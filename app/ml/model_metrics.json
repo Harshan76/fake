@@ -1,0 +1,25 @@
+{
+  "dataset_source": "CSV dataset from 'truthlens_dataset.csv' (200 samples: 100 REAL, 100 FAKE)",
+  "total_samples": 200,
+  "real_count": 100,
+  "fake_count": 100,
+  "train_samples": 160,
+  "test_samples": 40,
+  "train_accuracy": 100.0,
+  "test_accuracy": 90.0,
+  "test_precision": 94.44,
+  "test_recall": 85.0,
+  "test_f1_score": 89.47,
+  "confusion_matrix": {
+    "true_negatives_real": 19,
+    "false_positives_fake": 1,
+    "false_negatives_real": 3,
+    "true_positives_fake": 17
+  },
+  "algorithm": "CalibratedClassifierCV (Sigmoid, 3-fold) with LogisticRegression (C=2.5, liblinear)",
+  "feature_extractors": [
+    "Word TF-IDF Vectorizer (ngram=(1, 2), max_features=5000, sublinear_tf=True)",
+    "Character TF-IDF Vectorizer (ngram=(3, 5), max_features=4000, sublinear_tf=True)",
+    "LinguisticFeatureExtractor (8 handcrafted stylometric & attribution markers)"
+  ]
+}
