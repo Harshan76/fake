@@ -20,12 +20,28 @@ APP_NAME = "TruthLens"
 APP_DESCRIPTION = "AI-Powered Fake News Detection & Multi-Modal Verification System"
 VERSION = "2.0.0"
 
+def normalize_database_url(url: str) -> str:
+    """
+    Normalizes PostgreSQL database URLs to ensure the explicit 'postgresql+psycopg://' scheme.
+    Compatible with psycopg version 3 (psycopg[binary]>=3.2,<4).
+    Handles:
+      - postgres://... -> postgresql+psycopg://...
+      - postgresql+psycopg2://... -> postgresql+psycopg://...
+      - postgresql://... -> postgresql+psycopg://...
+      - postgresql+psycopg://... (preserved)
+      - sqlite://... (preserved)
+    """
+    if url.startswith("postgres://"):
+        return url.replace("postgres://", "postgresql+psycopg://", 1)
+    elif url.startswith("postgresql+psycopg2://"):
+        return url.replace("postgresql+psycopg2://", "postgresql+psycopg://", 1)
+    elif url.startswith("postgresql://") and not url.startswith("postgresql+"):
+        return url.replace("postgresql://", "postgresql+psycopg://", 1)
+    return url
+
 # Production Database Configuration
 raw_database_url = os.getenv("DATABASE_URL", f"sqlite:///{BASE_DIR / 'truthlens.db'}")
-# Normalize PostgreSQL URL for SQLAlchemy 1.4+ / 2.0 (Render & cloud providers often provide postgres://)
-if raw_database_url.startswith("postgres://"):
-    raw_database_url = raw_database_url.replace("postgres://", "postgresql://", 1)
-DATABASE_URL = raw_database_url
+DATABASE_URL = normalize_database_url(raw_database_url)
 
 # CORS Configuration (Configurable for Vercel deployment)
 # Example: CORS_ORIGINS="https://truthlens.vercel.app,http://localhost:3000,http://localhost:5173"

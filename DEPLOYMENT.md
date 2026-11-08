@@ -60,7 +60,7 @@ TruthLens uses a persistent relational PostgreSQL database for storing verificat
 4. Click **Create Database**.
 5. Once provisioned, scroll to the **Connections** panel and copy the **Internal Database URL** (if deploying backend on Render in the same region) or **External Database URL** (starts with `postgres://...`).
 
-> **Note on URL Normalization:** Render provides URLs beginning with `postgres://`. TruthLens automatically normalizes this to `postgresql://` in `app/config.py` for SQLAlchemy 2.0 compatibility.
+> **Note on URL Normalization & Driver Compatibility:** Render provides URLs beginning with `postgres://`. TruthLens automatically normalizes this to `postgresql+psycopg://` in `app/config.py` to use the modern `psycopg` (version 3, installed via `psycopg[binary]>=3.2,<4`) driver. Both `postgres://` and `postgresql://` inputs are automatically mapped to `postgresql+psycopg://` with zero manual intervention.
 
 ---
 

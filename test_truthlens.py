@@ -155,12 +155,47 @@ class TruthLensIntegrationTests(unittest.TestCase):
         self.assertFalse(safe)
         print("SSRF Security Protection Test Passed.")
 
-    def test_10_postgresql_url_normalization(self):
-        sample_render_url = "postgres://truthlens_user:secret_pass@dpg-abc123-a.oregon-postgres.render.com/truthlens_db"
-        if sample_render_url.startswith("postgres://"):
-            normalized = sample_render_url.replace("postgres://", "postgresql://", 1)
-        self.assertTrue(normalized.startswith("postgresql://"))
-        print("PostgreSQL Database URL Normalization Test Passed.")
+    def test_10_postgresql_psycopg_driver_and_normalization(self):
+        import psycopg
+        from app.config import normalize_database_url
+        from sqlalchemy import create_engine
+
+        # 1. Verify psycopg version 3 is loaded and meets >= 3.2 requirement
+        self.assertTrue(hasattr(psycopg, "__version__"))
+        major_minor = tuple(int(p) for p in psycopg.__version__.split(".")[:2])
+        self.assertGreaterEqual(major_minor, (3, 2))
+        self.assertLess(major_minor[0], 4)
+
+        # 2. Test URL normalization across common Render / Cloud variations
+        urls = {
+            "postgres://user:pass@host:5432/db": "postgresql+psycopg://user:pass@host:5432/db",
+            "postgresql://user:pass@host:5432/db": "postgresql+psycopg://user:pass@host:5432/db",
+            "postgresql+psycopg2://user:pass@host:5432/db": "postgresql+psycopg://user:pass@host:5432/db",
+            "postgresql+psycopg://user:pass@host:5432/db": "postgresql+psycopg://user:pass@host:5432/db",
+            "sqlite:///truthlens.db": "sqlite:///truthlens.db",
+        }
+        for raw, expected in urls.items():
+            normalized = normalize_database_url(raw)
+            self.assertEqual(normalized, expected, f"Failed normalizing {raw}")
+
+        # 3. Verify SQLAlchemy loads psycopg (v3) dialect without ModuleNotFoundError
+        test_engine = create_engine(normalize_database_url("postgres://u:p@localhost:5432/truthlens"))
+        self.assertEqual(test_engine.dialect.name, "postgresql")
+        self.assertEqual(test_engine.dialect.driver, "psycopg")
+
+        # 4. Verify live database connection probe and non-destructive initialization
+        self.assertTrue(check_db_connection(), "Database connectivity check failed")
+        self.assertTrue(init_db(), "Database initialization failed")
+
+        # 5. Verify records are preserved
+        db = SessionLocal()
+        try:
+            count = db.query(VerificationRecord).count()
+            self.assertGreaterEqual(count, 1, "Existing database records were lost")
+        finally:
+            db.close()
+
+        print(f"PostgreSQL psycopg Driver & Normalization Test Passed (psycopg v{psycopg.__version__}).")
 
 if __name__ == "__main__":
     unittest.main()
