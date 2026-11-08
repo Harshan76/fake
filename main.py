@@ -147,6 +147,8 @@ def health_check():
     """
     db_ok = check_db_connection()
     model_ok = get_model() is not None
+    from app.config import DATABASE_URL
+    db_type = "postgresql" if DATABASE_URL.startswith("postgresql") else "sqlite"
 
     status_str = "healthy" if (db_ok and model_ok) else "degraded"
     status_code = status.HTTP_200_OK if db_ok else status.HTTP_503_SERVICE_UNAVAILABLE
@@ -159,6 +161,7 @@ def health_check():
             "version": VERSION,
             "environment": ENVIRONMENT,
             "database": "connected" if db_ok else "disconnected",
+            "database_type": db_type,
             "model_loaded": model_ok
         }
     )

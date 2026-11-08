@@ -61,13 +61,18 @@ class TruthLensOCR {
 
     // Verify button
     if (this.verifyBtn) {
-      this.verifyBtn.addEventListener("click", () => {
-        const textToVerify = this.extractedTextArea.value.trim();
+      this.verifyBtn.addEventListener("click", (e) => {
+        if (e) e.preventDefault();
+        const textToVerify = this.extractedTextArea ? this.extractedTextArea.value.trim() : "";
         if (!textToVerify) {
           alert("No text available to verify. Please enter or edit the text.");
           return;
         }
-        window.TruthLensApp.executeVerification(textToVerify, "image", null, textToVerify);
+        if (window.TruthLensApp && typeof window.TruthLensApp.executeVerification === "function") {
+          window.TruthLensApp.executeVerification(textToVerify, "image", null, textToVerify);
+        } else {
+          alert("TruthLens verification engine is initializing. Please try again in a moment.");
+        }
       });
     }
   }
@@ -129,6 +134,14 @@ class TruthLensOCR {
   }
 }
 
-document.addEventListener("DOMContentLoaded", () => {
-  window.TruthLensOCR = new TruthLensOCR();
-});
+function initTruthLensOCR() {
+  if (!window.TruthLensOCR) {
+    window.TruthLensOCR = new TruthLensOCR();
+  }
+}
+
+if (document.readyState === "loading") {
+  document.addEventListener("DOMContentLoaded", initTruthLensOCR);
+} else {
+  initTruthLensOCR();
+}

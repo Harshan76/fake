@@ -85,13 +85,18 @@ class TruthLensVoice {
     }
 
     if (this.verifyBtn) {
-      this.verifyBtn.addEventListener("click", () => {
-        const text = this.transcriptArea.value.trim();
+      this.verifyBtn.addEventListener("click", (e) => {
+        if (e) e.preventDefault();
+        const text = this.transcriptArea ? this.transcriptArea.value.trim() : "";
         if (!text) {
           alert("Please record or enter a statement to verify.");
           return;
         }
-        window.TruthLensApp.executeVerification(text, "voice", null, text);
+        if (window.TruthLensApp && typeof window.TruthLensApp.executeVerification === "function") {
+          window.TruthLensApp.executeVerification(text, "voice", null, text);
+        } else {
+          alert("TruthLens verification engine is initializing. Please try again in a moment.");
+        }
       });
     }
   }
@@ -122,6 +127,14 @@ class TruthLensVoice {
   }
 }
 
-document.addEventListener("DOMContentLoaded", () => {
-  window.TruthLensVoice = new TruthLensVoice();
-});
+function initTruthLensVoice() {
+  if (!window.TruthLensVoice) {
+    window.TruthLensVoice = new TruthLensVoice();
+  }
+}
+
+if (document.readyState === "loading") {
+  document.addEventListener("DOMContentLoaded", initTruthLensVoice);
+} else {
+  initTruthLensVoice();
+}

@@ -134,6 +134,7 @@ class TruthLensIntegrationTests(unittest.TestCase):
         data = json.loads(health_resp.body.decode("utf-8"))
         self.assertEqual(data["status"], "healthy")
         self.assertEqual(data["database"], "connected")
+        self.assertIn(data["database_type"], ["postgresql", "sqlite"])
         self.assertTrue(data["model_loaded"])
         print("Production Health Check Test Passed.")
 
@@ -196,6 +197,32 @@ class TruthLensIntegrationTests(unittest.TestCase):
             db.close()
 
         print(f"PostgreSQL psycopg Driver & Normalization Test Passed (psycopg v{psycopg.__version__}).")
+
+    def test_11_frontend_scripts_and_verify_button(self):
+        # 1. Verify index.html contains the actual Verify News button with type="button"
+        index_html_path = Path(__file__).resolve().parent / "templates" / "index.html"
+        self.assertTrue(index_html_path.exists())
+        with open(index_html_path, "r", encoding="utf-8") as f:
+            html = f.read()
+
+        self.assertIn('id="btnVerifyText"', html)
+        self.assertIn('type="button"', html)
+        self.assertIn('Verify News', html)
+        self.assertIn('id="resEvidenceContainer"', html)
+        self.assertIn('id="resContradictingSection"', html)
+        self.assertIn('id="resSupportingSection"', html)
+
+        # 2. Verify static JS files are valid classic scripts and DO NOT use import.meta outside a module
+        js_files = ["app.js", "ocr.js", "voice.js"]
+        for jf in js_files:
+            js_path = Path(__file__).resolve().parent / "static" / "js" / jf
+            self.assertTrue(js_path.exists(), f"Missing static/js/{jf}")
+            with open(js_path, "r", encoding="utf-8") as f:
+                code = f.read()
+            self.assertNotIn("import.meta", code, f"Forbidden import.meta found in classic script {jf}")
+            self.assertNotIn("export ", code, f"Forbidden export found in classic script {jf}")
+
+        print("Frontend Script Parsing & Verify Button Integrity Test Passed.")
 
 if __name__ == "__main__":
     unittest.main()

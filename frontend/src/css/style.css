@@ -922,6 +922,65 @@ body {
   margin-top: 2px;
 }
 
+/* Evidence Findings (Supporting & Contradicting) */
+.evidence-findings-container {
+  margin-top: 1.5rem;
+}
+
+.evidence-items-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.85rem;
+  margin-top: 0.65rem;
+}
+
+.evidence-item-card {
+  background-color: #FAF9F6;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  padding: 0.95rem 1.15rem;
+  border-left: 4px solid var(--accent-gold);
+}
+
+.evidence-item-card.contradicting {
+  border-left-color: #DC2626;
+  background-color: #FEF2F2;
+}
+
+.evidence-item-card.supporting {
+  border-left-color: #059669;
+  background-color: #F0FDF4;
+}
+
+.evidence-source-tag {
+  font-size: 0.78rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin-bottom: 0.35rem;
+}
+
+.evidence-item-card.contradicting .evidence-source-tag {
+  color: #B91C1C;
+}
+
+.evidence-item-card.supporting .evidence-source-tag {
+  color: #047857;
+}
+
+.evidence-claim-title {
+  font-weight: 600;
+  font-size: 0.92rem;
+  color: var(--text-navy);
+  margin-bottom: 0.25rem;
+}
+
+.evidence-detail-text {
+  font-size: 0.86rem;
+  line-height: 1.55;
+  color: #4A5568;
+}
+
 /* Dual Confidence Meters */
 .confidence-submeters {
   background: #FAF8F5;

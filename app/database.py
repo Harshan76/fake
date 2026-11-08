@@ -17,12 +17,18 @@ if DATABASE_URL.startswith("postgresql"):
     )
     logger.info("Configured PostgreSQL connection pool with pre-ping validation.")
 else:
+    if IS_PRODUCTION:
+        logger.warning(
+            "⚠️ PRODUCTION DATABASE NOTICE: Application is running with ENVIRONMENT='production' "
+            "but DATABASE_URL is pointing to local SQLite. Ensure DATABASE_URL is configured "
+            "to a hosted PostgreSQL instance for persistent storage on Render."
+        )
     engine = create_engine(
         DATABASE_URL,
         connect_args={"check_same_thread": False},
         echo=False
     )
-    logger.info("Configured SQLite local database connection.")
+    logger.info("Configured SQLite database connection.")
 
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
