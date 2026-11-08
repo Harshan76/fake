@@ -192,15 +192,24 @@ async def general_exception_handler(request: Request, exc: Exception):
         }
     )
 
-# Root route serves local UI when running in self-contained / developer mode
+# Root route serves local UI when running in self-contained / monolithic deployments
 @app.get("/", response_class=HTMLResponse)
+@app.get("/index.html", response_class=HTMLResponse)
 def serve_home():
     """Serves the primary TruthLens frontend interface for local or monolithic deployments."""
     index_path = TEMPLATES_DIR / "index.html"
+    headers = {
+        "Cache-Control": "no-cache, no-store, must-revalidate",
+        "Pragma": "no-cache",
+        "Expires": "0"
+    }
     if index_path.exists():
         with open(index_path, "r", encoding="utf-8") as f:
-            return HTMLResponse(content=f.read())
-    return HTMLResponse("<h1>TruthLens Backend API is operational.</h1><p>Visit <a href='/docs'>/docs</a> for API specifications or <a href='/health'>/health</a> for system status.</p>")
+            return HTMLResponse(content=f.read(), headers=headers)
+    return HTMLResponse(
+        "<h1>TruthLens Backend API is operational.</h1><p>Visit <a href='/docs'>/docs</a> for API specifications or <a href='/health'>/health</a> for system status.</p>",
+        headers=headers
+    )
 
 if __name__ == "__main__":
     uvicorn.run("main:app", host=HOST, port=PORT, reload=False)

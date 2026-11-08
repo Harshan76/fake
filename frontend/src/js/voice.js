@@ -32,45 +32,53 @@ class TruthLensVoice {
       return;
     }
 
-    this.recognition = new SpeechRecognition();
-    this.recognition.continuous = true;
-    this.recognition.interimResults = true;
-    this.recognition.lang = "en-US";
+    try {
+      this.recognition = new SpeechRecognition();
+      this.recognition.continuous = true;
+      this.recognition.interimResults = true;
+      this.recognition.lang = "en-US";
 
-    this.recognition.onstart = () => {
-      this.isRecording = true;
-      this.micBtn.classList.add("recording");
-      this.waveform.classList.add("active");
-      this.micStatusLabel.textContent = "Listening... Speak clearly into your microphone";
-      if (this.previewBox) this.previewBox.classList.add("active");
-    };
+      this.recognition.onstart = () => {
+        this.isRecording = true;
+        this.micBtn.classList.add("recording");
+        this.waveform.classList.add("active");
+        this.micStatusLabel.textContent = "Listening... Speak clearly into your microphone";
+        if (this.previewBox) this.previewBox.classList.add("active");
+      };
 
-    this.recognition.onresult = (event) => {
-      let interim = "";
-      for (let i = event.resultIndex; i < event.results.length; ++i) {
-        if (event.results[i].isFinal) {
-          this.finalTranscript += event.results[i][0].transcript + " ";
-        } else {
-          interim += event.results[i][0].transcript;
+      this.recognition.onresult = (event) => {
+        let interim = "";
+        for (let i = event.resultIndex; i < event.results.length; ++i) {
+          if (event.results[i].isFinal) {
+            this.finalTranscript += event.results[i][0].transcript + " ";
+          } else {
+            interim += event.results[i][0].transcript;
+          }
         }
-      }
-      this.transcriptArea.value = (this.finalTranscript + interim).trim();
-    };
+        this.transcriptArea.value = (this.finalTranscript + interim).trim();
+      };
 
-    this.recognition.onerror = (event) => {
-      console.warn("Speech recognition error:", event.error);
-      this.stopRecording();
-      if (event.error === "not-allowed" || event.error === "service-not-allowed") {
-        if (this.permissionErrorBox) {
-          this.permissionErrorBox.style.display = "block";
-          this.permissionErrorBox.innerHTML = "<strong>Microphone Permission Denied:</strong> Please click the camera/microphone icon in your browser address bar and grant access to TruthLens.";
+      this.recognition.onerror = (event) => {
+        console.warn("Speech recognition error:", event.error);
+        this.stopRecording();
+        if (event.error === "not-allowed" || event.error === "service-not-allowed") {
+          if (this.permissionErrorBox) {
+            this.permissionErrorBox.style.display = "block";
+            this.permissionErrorBox.innerHTML = "<strong>Microphone Permission Denied:</strong> Please click the camera/microphone icon in your browser address bar and grant access to TruthLens.";
+          }
         }
-      }
-    };
+      };
 
-    this.recognition.onend = () => {
-      this.stopRecording();
-    };
+      this.recognition.onend = () => {
+        this.stopRecording();
+      };
+    } catch (e) {
+      console.warn("Speech recognition initialization prevented by browser environment:", e);
+      if (this.permissionErrorBox) {
+        this.permissionErrorBox.style.display = "block";
+        this.permissionErrorBox.innerHTML = "<strong>Notice:</strong> Speech recognition is not available in your current browser mode (e.g., InPrivate or permissions blocked).";
+      }
+    }
   }
 
   initEvents() {

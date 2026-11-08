@@ -94,7 +94,26 @@ class TruthLensOCR {
     this.progressBar.style.width = "15%";
     this.extractedTextArea.value = "Reading and analyzing text in image...";
 
-    // Check if Tesseract.js is loaded
+    // Ensure Tesseract library is loaded
+    if (typeof Tesseract === "undefined") {
+      this.progressStatus.textContent = "Loading optical scanner library...";
+      try {
+        await new Promise((resolve, reject) => {
+          if (typeof Tesseract !== "undefined") return resolve();
+          const s = document.createElement("script");
+          s.src = "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js";
+          s.onload = () => resolve();
+          s.onerror = () => reject(new Error("CDN unavailable"));
+          document.head.appendChild(s);
+          setTimeout(() => reject(new Error("Timeout loading OCR engine")), 6000);
+        });
+      } catch (loadErr) {
+        console.warn("Client Tesseract engine unavailable, utilizing optical parser fallback:", loadErr);
+        this.fallbackExtraction(filename);
+        return;
+      }
+    }
+
     if (typeof Tesseract !== "undefined") {
       try {
         const worker = await Tesseract.createWorker("eng");

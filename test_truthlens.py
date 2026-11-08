@@ -224,5 +224,35 @@ class TruthLensIntegrationTests(unittest.TestCase):
 
         print("Frontend Script Parsing & Verify Button Integrity Test Passed.")
 
+    def test_12_cache_control_and_index_routes(self):
+        from main import serve_home
+        resp = serve_home()
+        self.assertEqual(resp.status_code, 200)
+        self.assertIn("Cache-Control", resp.headers)
+        self.assertIn("no-cache", resp.headers["Cache-Control"])
+        self.assertIn("no-store", resp.headers["Cache-Control"])
+        print("Cache-Control Headers Test Passed.")
+
+    def test_13_database_rollback_guard(self):
+        from unittest.mock import MagicMock
+        from app.routers.verify import verify_endpoint
+        from app.schemas import VerificationRequest
+
+        mock_db = MagicMock()
+        mock_db.commit.side_effect = Exception("Simulated transient PostgreSQL lock/connection error")
+
+        req = VerificationRequest(
+            content="Scientists at CERN observed high-energy particle interactions matching standard model predictions.",
+            input_type="text"
+        )
+
+        # verify_endpoint must NOT raise unhandled 500 when db.commit() fails
+        res = verify_endpoint(req, db=mock_db)
+        self.assertIn("classification", res)
+        self.assertIn("confidence_score", res)
+        self.assertEqual(res["status"], "COMPLETED")
+        mock_db.rollback.assert_called_once()
+        print("Database Rollback Guard Test Passed.")
+
 if __name__ == "__main__":
     unittest.main()

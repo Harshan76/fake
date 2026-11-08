@@ -57,16 +57,26 @@ def get_history_detail(record_id: str, db: Session = Depends(get_db)):
 @router.delete("/{record_id}")
 def delete_history_record(record_id: str, db: Session = Depends(get_db)):
     """Deletes an individual verification record."""
-    record = db.query(VerificationRecord).filter(VerificationRecord.id == record_id).first()
-    if not record:
-        raise HTTPException(status_code=404, detail="Verification report not found.")
-    db.delete(record)
-    db.commit()
-    return {"success": True, "message": "Verification record removed successfully."}
+    try:
+        record = db.query(VerificationRecord).filter(VerificationRecord.id == record_id).first()
+        if not record:
+            raise HTTPException(status_code=404, detail="Verification report not found.")
+        db.delete(record)
+        db.commit()
+        return {"success": True, "message": "Verification record removed successfully."}
+    except HTTPException:
+        raise
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"Failed to delete record: {e}")
 
 @router.delete("")
 def clear_all_history(db: Session = Depends(get_db)):
     """Clears all verification records."""
-    count = db.query(VerificationRecord).delete()
-    db.commit()
-    return {"success": True, "deleted_count": count, "message": "History cleared successfully."}
+    try:
+        count = db.query(VerificationRecord).delete()
+        db.commit()
+        return {"success": True, "deleted_count": count, "message": "History cleared successfully."}
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"Failed to clear history: {e}")

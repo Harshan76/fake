@@ -70,7 +70,7 @@ class TruthLensApp {
   }
 
   // ------------------------------------------------------------------------
-  // Text Input Tab
+  // Text Input Tab & Verification Triggers
   // ------------------------------------------------------------------------
   initTextTab() {
     const textArea = document.getElementById("textInputArea");
@@ -92,7 +92,7 @@ class TruthLensApp {
       textArea.addEventListener("keydown", (e) => {
         if ((e.ctrlKey || e.metaKey) && e.key === "Enter") {
           e.preventDefault();
-          if (verifyBtn) verifyBtn.click();
+          this.verifyTextInput();
         }
       });
     }
@@ -106,35 +106,51 @@ class TruthLensApp {
             textArea.value = sampleText;
             textArea.dispatchEvent(new Event("input"));
             textArea.focus();
+            if (textError) textError.style.display = "none";
           }
         });
       });
     }
 
-    if (verifyBtn && textArea) {
+    if (verifyBtn) {
       verifyBtn.addEventListener("click", (e) => {
         if (e) e.preventDefault();
-        const text = textArea.value.trim();
-        if (!text) {
-          if (textError) {
-            textError.style.display = "block";
-            textError.textContent = "Please enter a news article, headline, or claim to verify.";
-          }
-          textArea.focus();
-          return;
-        }
-        if (text.length < 5) {
-          if (textError) {
-            textError.style.display = "block";
-            textError.textContent = "Please enter at least 5 characters to analyze factual claims.";
-          }
-          textArea.focus();
-          return;
-        }
-        if (textError) textError.style.display = "none";
-        this.executeVerification(text, "text");
+        this.verifyTextInput();
       });
     }
+  }
+
+  verifyTextInput() {
+    const textArea = document.getElementById("textInputArea");
+    const textError = document.getElementById("textErrorAlert");
+    if (!textArea) {
+      console.warn("textInputArea not found in DOM");
+      return;
+    }
+
+    const text = textArea.value.trim();
+    if (!text) {
+      if (textError) {
+        textError.style.display = "block";
+        textError.textContent = "Please enter a news article, headline, or claim to verify, or click one of the test samples above.";
+      }
+      textArea.focus();
+      const workspace = document.getElementById("verify-workspace");
+      if (workspace) workspace.scrollIntoView({ behavior: "smooth", block: "start" });
+      return;
+    }
+
+    if (text.length < 5) {
+      if (textError) {
+        textError.style.display = "block";
+        textError.textContent = "The news claim is too brief. Please enter at least 5 characters to analyze factual claims.";
+      }
+      textArea.focus();
+      return;
+    }
+
+    if (textError) textError.style.display = "none";
+    this.executeVerification(text, "text");
   }
 
   // ------------------------------------------------------------------------
@@ -686,9 +702,36 @@ class TruthLensApp {
 // Resilient initialization: works whether DOM is already loaded or still loading
 function initTruthLensApp() {
   if (!window.TruthLensApp) {
-    window.TruthLensApp = new TruthLensApp();
+    try {
+      window.TruthLensApp = new TruthLensApp();
+      console.log("TruthLens verification engine initialized successfully.");
+    } catch (e) {
+      console.error("Fatal error initializing TruthLensApp:", e);
+    }
   }
 }
+
+// Global click handler available directly from inline HTML onclick
+window.truthLensVerifyText = function(e) {
+  if (e && typeof e.preventDefault === "function") e.preventDefault();
+  if (window.TruthLensApp && typeof window.TruthLensApp.verifyTextInput === "function") {
+    window.TruthLensApp.verifyTextInput();
+  } else {
+    initTruthLensApp();
+    if (window.TruthLensApp && typeof window.TruthLensApp.verifyTextInput === "function") {
+      window.TruthLensApp.verifyTextInput();
+    }
+  }
+};
+
+// Document-level event delegation ensures clicks are NEVER lost
+document.addEventListener("click", function(e) {
+  const btn = e.target && e.target.closest ? e.target.closest("#btnVerifyText, .btn-trigger-verify") : null;
+  if (btn) {
+    e.preventDefault();
+    window.truthLensVerifyText(e);
+  }
+});
 
 if (document.readyState === "loading") {
   document.addEventListener("DOMContentLoaded", initTruthLensApp);

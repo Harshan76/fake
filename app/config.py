@@ -43,6 +43,13 @@ def normalize_database_url(url: str) -> str:
 raw_database_url = os.getenv("DATABASE_URL", f"sqlite:///{BASE_DIR / 'truthlens.db'}")
 DATABASE_URL = normalize_database_url(raw_database_url)
 
+if IS_PRODUCTION and DATABASE_URL.startswith("sqlite"):
+    import logging
+    logging.getLogger("truthlens.config").warning(
+        "CRITICAL WARNING: Running in PRODUCTION mode with an ephemeral SQLite database! "
+        "Set the DATABASE_URL environment variable to a persistent PostgreSQL instance (e.g. on Render/Supabase/Neon)."
+    )
+
 # CORS Configuration (Configurable for Vercel deployment)
 # Example: CORS_ORIGINS="https://truthlens.vercel.app,http://localhost:3000,http://localhost:5173"
 raw_cors = os.getenv("CORS_ORIGINS", "*")

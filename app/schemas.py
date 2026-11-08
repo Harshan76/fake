@@ -3,10 +3,10 @@ from pydantic import BaseModel, Field, HttpUrl
 from datetime import datetime
 
 class SourceItem(BaseModel):
-    title: str
-    publisher: str
-    url: str
-    description: str
+    title: Optional[str] = "Source Reference"
+    publisher: Optional[str] = "Verified Source"
+    url: Optional[str] = "#"
+    description: Optional[str] = "Verified documentation."
     reliability: Optional[str] = "High"
 
 class VerificationRequest(BaseModel):
@@ -40,22 +40,22 @@ class DocumentExtractionResponse(BaseModel):
 
 class VerificationResponse(BaseModel):
     id: str
-    input_type: str
+    input_type: str = "text"
     submitted_content: str
     extracted_text: Optional[str] = None
     original_url: Optional[str] = None
-    classification: str  # 'REAL', 'FAKE', 'UNABLE TO VERIFY'
-    confidence_score: float
+    classification: str = "UNABLE TO VERIFY"  # 'REAL', 'FAKE', 'UNABLE TO VERIFY'
+    confidence_score: float = 50.0
     ml_confidence: Optional[float] = None
     evidence_score: Optional[float] = None
     summary: Optional[str] = None
-    explanation: str
-    identified_claims: List[str] = []
+    explanation: str = ""
+    identified_claims: List[Any] = []
     supporting_evidence: List[Dict[str, Any]] = []
     contradicting_evidence: List[Dict[str, Any]] = []
-    sources: List[SourceItem] = []
-    status: str
-    timestamp: str
+    sources: List[Dict[str, Any]] = []
+    status: str = "COMPLETED"
+    timestamp: Optional[str] = None
 
 class PlatformStatsResponse(BaseModel):
     total_verifications: int

@@ -1,4 +1,7 @@
 import os
+import uuid
+import logging
+from datetime import datetime
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form
 from sqlalchemy.orm import Session
 from typing import Optional
@@ -14,6 +17,7 @@ from app.services.url_scraper import scrape_article_from_url
 from app.services.document_parser import parse_document
 from app.config import MAX_UPLOAD_SIZE_BYTES, ALLOWED_DOCUMENT_EXTENSIONS, ALLOWED_IMAGE_EXTENSIONS
 
+logger = logging.getLogger("truthlens.verify")
 router = APIRouter(prefix="/api", tags=["Verification"])
 
 @router.post("/verify", response_model=VerificationResponse)
@@ -35,8 +39,12 @@ def verify_endpoint(payload: VerificationRequest, db: Session = Depends(get_db))
         original_url=payload.original_url
     )
 
-    # Persist record in database
+    rec_id = str(uuid.uuid4())
+    rec_time = datetime.utcnow()
+
+    # Persist record in database with rollback guard
     record = VerificationRecord(
+        id=rec_id,
         input_type=payload.input_type,
         submitted_content=payload.content,
         extracted_text=payload.extracted_text,
@@ -51,14 +59,37 @@ def verify_endpoint(payload: VerificationRequest, db: Session = Depends(get_db))
         supporting_evidence=result.get("supporting_evidence", []),
         contradicting_evidence=result.get("contradicting_evidence", []),
         sources=result.get("sources", []),
-        status="COMPLETED"
+        status="COMPLETED",
+        timestamp=rec_time
     )
 
-    db.add(record)
-    db.commit()
-    db.refresh(record)
-
-    return record.to_dict()
+    try:
+        db.add(record)
+        db.commit()
+        db.refresh(record)
+        return record.to_dict()
+    except Exception as db_err:
+        db.rollback()
+        logger.error(f"Database error while saving verification record: {db_err}")
+        return {
+            "id": rec_id,
+            "input_type": payload.input_type,
+            "submitted_content": payload.content,
+            "extracted_text": payload.extracted_text,
+            "original_url": payload.original_url,
+            "classification": result["classification"],
+            "confidence_score": round(result["confidence_score"], 1),
+            "ml_confidence": round(result.get("ml_confidence"), 1) if result.get("ml_confidence") is not None else None,
+            "evidence_score": round(result.get("evidence_score"), 1) if result.get("evidence_score") is not None else None,
+            "summary": result.get("summary"),
+            "explanation": result["explanation"],
+            "identified_claims": result.get("identified_claims", []),
+            "supporting_evidence": result.get("supporting_evidence", []),
+            "contradicting_evidence": result.get("contradicting_evidence", []),
+            "sources": result.get("sources", []),
+            "status": "COMPLETED",
+            "timestamp": rec_time.isoformat()
+        }
 
 @router.post("/extract-url", response_model=UrlExtractionResponse)
 def extract_url_endpoint(payload: UrlExtractionRequest):
