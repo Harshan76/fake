@@ -1,0 +1,30 @@
+# Render Blueprint Specification for TruthLens
+# https://render.com/docs/blueprint-spec
+
+databases:
+  - name: truthlens-db
+    databaseName: truthlens
+    user: truthlens_user
+    plan: free # or starter
+    ipAllowList: [] # Allow all internal connections
+
+services:
+  - type: web
+    name: truthlens-backend
+    runtime: python
+    plan: free # or starter
+    buildCommand: "pip install -r requirements.txt"
+    startCommand: "uvicorn main:app --host 0.0.0.0 --port $PORT"
+    healthCheckPath: /health
+    autoDeploy: true
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.10.14
+      - key: ENVIRONMENT
+        value: production
+      - key: DATABASE_URL
+        fromDatabase:
+          name: truthlens-db
+          property: connectionString
+      - key: CORS_ORIGINS
+        value: "*" # Update to your Vercel URL once deployed, e.g. "https://your-truthlens.vercel.app"

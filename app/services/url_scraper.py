@@ -1,17 +1,25 @@
 import re
+import socket
+import ipaddress
 import urllib.parse
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Tuple
 import requests
 from bs4 import BeautifulSoup
 
 REQUEST_HEADERS = {
-    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36 TruthLens/2.0",
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36 TruthLens-FactCheck/2.0",
     "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
     "Accept-Language": "en-US,en;q=0.9",
     "Sec-Fetch-Dest": "document",
     "Sec-Fetch-Mode": "navigate",
     "Sec-Fetch-Site": "cross-site",
     "Cache-Control": "max-age=0"
+}
+
+# Blocked hostnames frequently targeted in SSRF attacks
+BLOCKED_HOSTNAMES = {
+    "localhost", "127.0.0.1", "0.0.0.0", "::1", "metadata.google.internal",
+    "169.254.169.254", "instance-data", "metadata"
 }
 
 def validate_url(url: str) -> bool:
@@ -22,17 +30,63 @@ def validate_url(url: str) -> bool:
     except Exception:
         return False
 
+def is_safe_public_url(url: str) -> Tuple[bool, str]:
+    """
+    Validates URL to protect against Server-Side Request Forgery (SSRF).
+    Verifies that the target host does not resolve to private IP spaces
+    (10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16), loopback (127.0.0.0/8, ::1),
+    cloud instance metadata (169.254.169.254), or reserved networks.
+    """
+    clean_url = url.strip()
+    if not validate_url(clean_url):
+        return False, "The provided URL is invalid. Please supply a complete address starting with http:// or https://."
+
+    parsed = urllib.parse.urlparse(clean_url)
+    hostname = parsed.hostname
+
+    if not hostname:
+        return False, "Unable to extract a valid domain name from the URL."
+
+    hostname_lower = hostname.lower()
+    if hostname_lower in BLOCKED_HOSTNAMES:
+        return False, "Access to localhost, internal network, or cloud metadata endpoints is prohibited for security."
+
+    try:
+        # Resolve all IP addresses for the hostname
+        addr_info = socket.getaddrinfo(hostname, None)
+        for item in addr_info:
+            ip_str = item[4][0]
+            ip_obj = ipaddress.ip_address(ip_str)
+
+            if (
+                ip_obj.is_private or
+                ip_obj.is_loopback or
+                ip_obj.is_link_local or
+                ip_obj.is_multicast or
+                ip_obj.is_reserved or
+                ip_obj.is_unspecified
+            ):
+                return False, f"Access to private or restricted network address ({ip_str}) is prohibited."
+    except socket.gaierror:
+        # Domain name does not resolve
+        return False, f"Domain name '{hostname}' could not be resolved. Please verify the URL."
+    except Exception as e:
+        return False, f"Network validation failed: {str(e)}"
+
+    return True, ""
+
 def scrape_article_from_url(url: str) -> Dict[str, Any]:
     """
     Fetches article content from a news hyperlink.
     Extracts title, publisher, author, published date, and full article body.
-    Handles bot-blocking, paywalls, and connection timeouts gracefully.
+    Handles SSRF prevention, bot-blocking, paywalls, and connection timeouts gracefully.
     """
     clean_url = url.strip()
-    if not validate_url(clean_url):
+    is_safe, error_msg = is_safe_public_url(clean_url)
+    if not is_safe:
         return {
             "success": False,
-            "error": "The provided URL is invalid. Please supply a complete address starting with http:// or https://."
+            "error": error_msg
         }
 
     domain = urllib.parse.urlparse(clean_url).netloc.lower()
@@ -73,7 +127,6 @@ def scrape_article_from_url(url: str) -> Dict[str, Any]:
 
         # 1. Extract Title
         title = None
-        # Check og:title
         og_title = soup.find("meta", property="og:title") or soup.find("meta", attrs={"name": "twitter:title"})
         if og_title and og_title.get("content"):
             title = og_title["content"].strip()
@@ -111,7 +164,6 @@ def scrape_article_from_url(url: str) -> Dict[str, Any]:
             pub_date = date_meta["content"].strip()
 
         # 5. Extract Body Text
-        # Look for <article> tag or main content wrappers
         article_elem = soup.find("article") or soup.find("main") or soup.find("div", class_=re.compile(r'content|article-body|story-body|post-content', re.I))
         
         paragraphs = []
@@ -122,7 +174,6 @@ def scrape_article_from_url(url: str) -> Dict[str, Any]:
 
         for p in p_tags:
             text = p.get_text(strip=True)
-            # Filter boilerplate sentences
             if len(text) > 30 and not re.search(r'cookie|subscribe|all rights reserved|terms of service|newsletter', text, re.I):
                 paragraphs.append(text)
 

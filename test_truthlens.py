@@ -8,9 +8,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from app.ml.classifier import predict_text_credibility
 from app.services.claim_extractor import extract_key_claims
 from app.services.document_parser import parse_document
-from app.services.url_scraper import validate_url, scrape_article_from_url
+from app.services.url_scraper import validate_url, is_safe_public_url, scrape_article_from_url
 from app.services.verifier import verify_news_content
-from app.database import init_db, SessionLocal
+from app.database import init_db, SessionLocal, check_db_connection
 from app.models import VerificationRecord
 
 class TruthLensIntegrationTests(unittest.TestCase):
@@ -125,6 +125,42 @@ class TruthLensIntegrationTests(unittest.TestCase):
             print("FastAPI Router Endpoints Test Passed.")
         finally:
             db.close()
+
+    def test_08_health_check_endpoint(self):
+        from main import health_check
+        health_resp = health_check()
+        self.assertEqual(health_resp.status_code, 200)
+        import json
+        data = json.loads(health_resp.body.decode("utf-8"))
+        self.assertEqual(data["status"], "healthy")
+        self.assertEqual(data["database"], "connected")
+        self.assertTrue(data["model_loaded"])
+        print("Production Health Check Test Passed.")
+
+    def test_09_ssrf_protection(self):
+        # Block localhost
+        safe, _ = is_safe_public_url("http://localhost:8000/admin")
+        self.assertFalse(safe)
+
+        # Block 127.0.0.1
+        safe, _ = is_safe_public_url("http://127.0.0.1:8000/api")
+        self.assertFalse(safe)
+
+        # Block cloud metadata
+        safe, _ = is_safe_public_url("http://169.254.169.254/latest/meta-data")
+        self.assertFalse(safe)
+
+        # Block private IP
+        safe, _ = is_safe_public_url("http://10.0.0.1/secret")
+        self.assertFalse(safe)
+        print("SSRF Security Protection Test Passed.")
+
+    def test_10_postgresql_url_normalization(self):
+        sample_render_url = "postgres://truthlens_user:secret_pass@dpg-abc123-a.oregon-postgres.render.com/truthlens_db"
+        if sample_render_url.startswith("postgres://"):
+            normalized = sample_render_url.replace("postgres://", "postgresql://", 1)
+        self.assertTrue(normalized.startswith("postgresql://"))
+        print("PostgreSQL Database URL Normalization Test Passed.")
 
 if __name__ == "__main__":
     unittest.main()

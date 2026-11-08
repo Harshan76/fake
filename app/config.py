@@ -8,13 +8,29 @@ TEMPLATES_DIR = BASE_DIR / "templates"
 MODEL_DIR = BASE_DIR / "app" / "ml"
 MODEL_PATH = MODEL_DIR / "truthlens_model.joblib"
 
-# Database Configuration
-DATABASE_URL = os.getenv("DATABASE_URL", f"sqlite:///{BASE_DIR / 'truthlens.db'}")
+# Environment & Server Settings
+ENVIRONMENT = os.getenv("ENVIRONMENT", "development").lower()
+IS_PRODUCTION = ENVIRONMENT == "production"
+DEBUG = False if IS_PRODUCTION else (os.getenv("DEBUG", "false").lower() == "true")
+PORT = int(os.getenv("PORT", 8000))
+HOST = os.getenv("HOST", "0.0.0.0")
 
-# Application Settings
+# Application Metadata
 APP_NAME = "TruthLens"
 APP_DESCRIPTION = "AI-Powered Fake News Detection & Multi-Modal Verification System"
 VERSION = "2.0.0"
+
+# Production Database Configuration
+raw_database_url = os.getenv("DATABASE_URL", f"sqlite:///{BASE_DIR / 'truthlens.db'}")
+# Normalize PostgreSQL URL for SQLAlchemy 1.4+ / 2.0 (Render & cloud providers often provide postgres://)
+if raw_database_url.startswith("postgres://"):
+    raw_database_url = raw_database_url.replace("postgres://", "postgresql://", 1)
+DATABASE_URL = raw_database_url
+
+# CORS Configuration (Configurable for Vercel deployment)
+# Example: CORS_ORIGINS="https://truthlens.vercel.app,http://localhost:3000,http://localhost:5173"
+raw_cors = os.getenv("CORS_ORIGINS", "*")
+CORS_ORIGINS = [orig.strip() for orig in raw_cors.split(",") if orig.strip()]
 
 # Upload Limits
 MAX_UPLOAD_SIZE_BYTES = 15 * 1024 * 1024  # 15 MB

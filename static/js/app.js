@@ -1,11 +1,30 @@
 /**
- * TruthLens Main Application Controller
- * Handles tabs, multi-input verification pipeline, results rendering, and history archive.
+ * TruthLens Main Application Controller (Production Vercel & Render Ready)
+ * Handles tabs, multi-input verification pipeline, results rendering, and persistent history archive.
  */
+
+// Dynamic API Base URL resolution for Vercel -> Render cross-origin communication
+function getApiBaseUrl() {
+  try {
+    if (typeof import.meta !== 'undefined' && import.meta.env?.VITE_API_BASE_URL) {
+      const viteUrl = import.meta.env.VITE_API_BASE_URL.trim().replace(/\/+$/, '');
+      if (viteUrl) return viteUrl;
+    }
+  } catch (e) {}
+
+  if (typeof window !== 'undefined' && window.__TRUTHLENS_CONFIG__?.API_BASE_URL) {
+    return window.__TRUTHLENS_CONFIG__.API_BASE_URL.trim().replace(/\/+$/, '');
+  }
+
+  return '';
+}
+
+const API_BASE = getApiBaseUrl();
 
 class TruthLensApp {
   constructor() {
     this.currentInputType = "text";
+    this.apiBase = API_BASE;
     this.initTabs();
     this.initTextTab();
     this.initUrlTab();
@@ -103,7 +122,7 @@ class TruthLensApp {
         fetchBtn.innerHTML = `<span>Fetching...</span>`;
 
         try {
-          const res = await fetch("/api/extract-url", {
+          const res = await fetch(`${this.apiBase}/api/extract-url`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ url })
@@ -125,7 +144,7 @@ class TruthLensApp {
         } catch (err) {
           if (errorBox) {
             errorBox.style.display = "block";
-            errorBox.textContent = "Network error connecting to URL extraction service.";
+            errorBox.textContent = "Network error connecting to verification backend service.";
           }
         } finally {
           fetchBtn.disabled = false;
@@ -154,10 +173,7 @@ class TruthLensApp {
     const dropzone = document.getElementById("docDropzone");
     const fileInput = document.getElementById("docFileInput");
     const previewBox = document.getElementById("docPreviewBox");
-    const docMetaElem = document.getElementById("docPreviewMeta");
-    const docBodyElem = document.getElementById("docExtractedText");
     const verifyBtn = document.getElementById("btnVerifyDocContent");
-    const errorBox = document.getElementById("docErrorAlert");
 
     if (dropzone && fileInput) {
       dropzone.addEventListener("click", () => fileInput.click());
@@ -187,9 +203,10 @@ class TruthLensApp {
       });
     }
 
-    if (verifyBtn && docBodyElem) {
+    if (verifyBtn) {
+      const docBodyElem = document.getElementById("docExtractedText");
       verifyBtn.addEventListener("click", () => {
-        const text = docBodyElem.value.trim();
+        const text = docBodyElem ? docBodyElem.value.trim() : "";
         if (!text) {
           alert("No document text to verify.");
           return;
@@ -211,7 +228,7 @@ class TruthLensApp {
     formData.append("file", file);
 
     try {
-      const res = await fetch("/api/extract-doc", {
+      const res = await fetch(`${this.apiBase}/api/extract-doc`, {
         method: "POST",
         body: formData
       });
@@ -230,7 +247,7 @@ class TruthLensApp {
     } catch (e) {
       if (errorBox) {
         errorBox.style.display = "block";
-        errorBox.textContent = "Network error while uploading document.";
+        errorBox.textContent = "Network error while uploading document to backend.";
       }
     }
   }
@@ -264,7 +281,7 @@ class TruthLensApp {
     }, 1400);
 
     try {
-      const res = await fetch("/api/verify", {
+      const res = await fetch(`${this.apiBase}/api/verify`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -280,7 +297,8 @@ class TruthLensApp {
       clearTimeout(stepTimer3);
 
       if (!res.ok) {
-        throw new Error(`Verification service returned status ${res.status}`);
+        const errJson = await res.json().catch(() => ({}));
+        throw new Error(errJson.detail || `Backend returned status ${res.status}`);
       }
 
       const result = await res.json();
@@ -432,10 +450,10 @@ class TruthLensApp {
     if (!container) return;
 
     try {
-      let url = `/api/history?filter=${this.currentHistoryFilter}`;
-      if (searchQuery) url += `&search=${encodeURIComponent(searchQuery)}`;
+      let endpoint = `/api/history?filter=${encodeURIComponent(this.currentHistoryFilter)}`;
+      if (searchQuery) endpoint += `&search=${encodeURIComponent(searchQuery)}`;
 
-      const res = await fetch(url);
+      const res = await fetch(`${this.apiBase}${endpoint}`);
       const records = await res.json();
 
       container.innerHTML = "";
@@ -481,7 +499,7 @@ class TruthLensApp {
         container.appendChild(row);
       });
     } catch (e) {
-      console.warn("Error loading history:", e);
+      console.warn("Error loading history from backend:", e);
     }
   }
 
