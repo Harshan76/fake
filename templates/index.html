@@ -1,0 +1,644 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>TruthLens – AI-Powered Fake News Detection System</title>
+  <meta name="description" content="TruthLens helps you identify misinformation by analyzing news articles, screenshots, text and voice inputs using AI-powered analysis and credible information sources.">
+  
+  <!-- Favicon -->
+  <link rel="icon" type="image/svg+xml" href="/static/images/logo.svg">
+
+  <!-- Typography -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Newsreader:ital,opsz,wght@0,6..72,400;0,6..72,600;0,6..72,700;1,6..72,400;1,6..72,700&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+
+  <!-- Stylesheet -->
+  <link rel="stylesheet" href="/static/css/style.css">
+
+  <!-- Client-side Tesseract.js OCR Engine -->
+  <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
+</head>
+<body>
+
+  <!-- ========================================================================
+       Navigation Bar
+       ======================================================================== -->
+  <header class="navbar">
+    <div class="nav-container">
+      <a href="#" class="brand-link">
+        <img src="/static/images/logo.svg" alt="TruthLens Logo" class="brand-logo">
+        <span class="brand-text">Truth<span>Lens</span></span>
+      </a>
+
+      <nav>
+        <ul class="nav-menu">
+          <li class="nav-item"><a href="#home">Home</a></li>
+          <li class="nav-item"><a href="#verify-workspace">Verify News</a></li>
+          <li class="nav-item"><a href="#how-it-works">How It Works</a></li>
+          <li class="nav-item"><a href="#history">History</a></li>
+          <li class="nav-item"><a href="#about">About</a></li>
+          <li class="nav-item">
+            <a href="#verify-workspace" class="btn-nav-verify">Verify News</a>
+          </li>
+        </ul>
+      </nav>
+    </div>
+  </header>
+
+  <!-- ========================================================================
+       Hero Section
+       ======================================================================== -->
+  <main id="home">
+    <section class="hero-section">
+      <div class="hero-grid">
+        <div class="hero-text-content">
+          <h1 class="hero-title">
+            See past the headline.<br>
+            <span class="highlight-gold">Verify</span> the story.
+          </h1>
+          <p class="hero-description">
+            TruthLens helps you identify misinformation by analyzing news articles, screenshots, text and voice inputs using AI-powered analysis and credible information sources.
+          </p>
+
+          <div class="hero-actions">
+            <a href="#verify-workspace" class="btn-primary">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+                <circle cx="11" cy="11" r="8"></circle>
+                <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+              </svg>
+              Verify News
+            </a>
+            <a href="#how-it-works" class="btn-secondary">
+              How It Works
+            </a>
+          </div>
+        </div>
+
+        <!-- Right Side Verification Mockup Illustration -->
+        <div class="hero-illustration-wrapper">
+          <div class="hero-card-mockup">
+            <div class="mockup-header">
+              <span class="mockup-source">Global Wire Service</span>
+              <span class="mockup-date">Nov 2026 • Verified</span>
+            </div>
+            <h3 class="mockup-headline">
+              Deep Space Observatory Confirms Early Cosmic Formations
+            </h3>
+            <div class="mockup-body-lines">
+              <div class="mockup-line"></div>
+              <div class="mockup-line medium"></div>
+              <div class="mockup-line short"></div>
+            </div>
+
+            <div class="mockup-lens-scanner">
+              <div class="lens-icon-bubble">
+                <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path>
+                  <polyline points="22 4 12 14.01 9 11.01"></polyline>
+                </svg>
+              </div>
+              <div>
+                <div class="lens-data-label">Credibility Index</div>
+                <div class="lens-data-val lens-data-value">88.5% REAL</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Feature Highlights Row -->
+      <div class="hero-features-bar" style="margin-top: 3.5rem;">
+        <div class="hero-feature-item">
+          <div class="feature-icon-badge">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <rect x="2" y="3" width="20" height="14" rx="2" ry="2"></rect>
+              <line x1="8" y1="21" x2="16" y2="21"></line>
+              <line x1="12" y1="17" x2="12" y2="21"></line>
+            </svg>
+          </div>
+          <div>
+            <div class="feature-text-main">Multiple Input Methods</div>
+            <div class="feature-text-sub">Text, URL, Images, Voice & Docs</div>
+          </div>
+        </div>
+
+        <div class="hero-feature-item">
+          <div class="feature-icon-badge">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path>
+            </svg>
+          </div>
+          <div>
+            <div class="feature-text-main">Evidence-Based News Verification</div>
+            <div class="feature-text-sub">Cross-checked with primary archives</div>
+          </div>
+        </div>
+
+        <div class="hero-feature-item">
+          <div class="feature-icon-badge">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <line x1="18" y1="20" x2="18" y2="10"></line>
+              <line x1="12" y1="20" x2="12" y2="4"></line>
+              <line x1="6" y1="20" x2="6" y2="14"></line>
+            </svg>
+          </div>
+          <div>
+            <div class="feature-text-main">Confidence Score</div>
+            <div class="feature-text-sub">Real model & external evidence ratings</div>
+          </div>
+        </div>
+
+        <div class="hero-feature-item">
+          <div class="feature-icon-badge">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"></path>
+              <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"></path>
+            </svg>
+          </div>
+          <div>
+            <div class="feature-text-main">Transparent Source References</div>
+            <div class="feature-text-sub">Real clickable publisher links</div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ========================================================================
+         Verification Workspace Dashboard
+         ======================================================================== -->
+    <section id="verify-workspace" class="workspace-section">
+      <div class="section-header">
+        <span class="section-pill">Forensic Intelligence</span>
+        <h2 class="section-title">News Verification Studio</h2>
+        <p class="section-subtitle">Choose your preferred input method below to cross-examine claims with machine learning and independent sources.</p>
+      </div>
+
+      <div class="verification-card">
+        <!-- Input Tabs Navigation -->
+        <div class="input-tabs-nav">
+          <button class="tab-btn active" data-tab="text">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <line x1="17" y1="10" x2="3" y2="10"></line>
+              <line x1="21" y1="6" x2="3" y2="6"></line>
+              <line x1="21" y1="14" x2="3" y2="14"></line>
+              <line x1="17" y1="18" x2="3" y2="18"></line>
+            </svg>
+            Text / Article
+          </button>
+
+          <button class="tab-btn" data-tab="url">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"></path>
+              <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"></path>
+            </svg>
+            URL Link
+          </button>
+
+          <button class="tab-btn" data-tab="image">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
+              <circle cx="8.5" cy="8.5" r="1.5"></circle>
+              <polyline points="21 15 16 10 5 21"></polyline>
+            </svg>
+            Screenshot & Image (OCR)
+          </button>
+
+          <button class="tab-btn" data-tab="voice">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"></path>
+              <path d="M19 10v2a7 7 0 0 1-14 0v-2"></path>
+              <line x1="12" y1="19" x2="12" y2="23"></line>
+              <line x1="8" y1="23" x2="16" y2="23"></line>
+            </svg>
+            Voice Claim
+          </button>
+
+          <button class="tab-btn" data-tab="doc">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+              <polyline points="14 2 14 8 20 8"></polyline>
+              <line x1="16" y1="13" x2="8" y2="13"></line>
+              <line x1="16" y1="17" x2="8" y2="17"></line>
+              <polyline points="10 9 9 9 8 9"></polyline>
+            </svg>
+            Document (PDF/DOCX)
+          </button>
+        </div>
+
+        <!-- 1. Text Panel -->
+        <div id="panel-text" class="tab-content-panel active">
+          <div class="form-group">
+            <label class="form-label" for="textInputArea">Enter Headline, Claim or Paste News Article:</label>
+            <textarea id="textInputArea" class="text-area-input" placeholder="Paste full article text, social media statements, or individual claims here..."></textarea>
+            
+            <div class="input-metadata-bar">
+              <span id="textWordCount">0 words</span>
+              <div class="sample-pills">
+                <span style="font-weight: 600;">Test Samples:</span>
+                <button class="sample-btn" data-sample="The World Health Organization confirmed today that global vaccination coverage has reached 72% according to official surveillance data published in Geneva.">
+                  Verified Real News
+                </button>
+                <button class="sample-btn" data-sample="URGENT ALERT: Boiled garlic water mixed with lemon 100% destroys all viral infections overnight! Big Pharma doctors are desperately trying to ban this secret cure! SHARE BEFORE DELETED!!!">
+                  Viral WhatsApp Hoax
+                </button>
+                <button class="sample-btn" data-sample="City municipal department considers revising recycling pickup routes starting in late autumn.">
+                  Ambiguous Statement
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <div style="text-align: right;">
+            <button id="btnVerifyText" class="btn-primary">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <circle cx="11" cy="11" r="8"></circle>
+                <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+              </svg>
+              Verify News Now
+            </button>
+          </div>
+        </div>
+
+        <!-- 2. URL Panel -->
+        <div id="panel-url" class="tab-content-panel">
+          <div class="form-group">
+            <label class="form-label" for="urlInputField">Paste News Article Hyperlink:</label>
+            <div class="url-input-wrapper">
+              <input type="url" id="urlInputField" class="text-field-input" placeholder="https://www.reuters.com/world/article-slug...">
+              <button id="btnFetchUrl" class="btn-primary" style="white-space: nowrap;">
+                Fetch & Analyze
+              </button>
+            </div>
+            <div id="urlErrorAlert" style="display: none; color: #DC2626; font-size: 0.88rem; margin-top: 0.75rem;"></div>
+          </div>
+
+          <!-- URL Preview Box -->
+          <div id="urlPreviewBox" class="extracted-preview-box">
+            <div class="preview-header">
+              <span class="preview-title">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+                </svg>
+                Article Extracted Successfully
+              </span>
+              <span id="urlPreviewMeta" style="font-size: 0.8rem; color: var(--text-muted);"></span>
+            </div>
+            <h4 id="urlPreviewTitle" style="font-family: var(--font-heading); margin-bottom: 0.75rem; font-size: 1.25rem;"></h4>
+            <textarea id="urlPreviewBody" class="text-area-input" style="min-height: 140px; margin-bottom: 1rem;"></textarea>
+            
+            <div style="text-align: right;">
+              <button id="btnVerifyUrl" class="btn-primary">
+                Verify Extracted Content
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <!-- 3. Image & Screenshot OCR Panel -->
+        <div id="panel-image" class="tab-content-panel">
+          <div id="imageDropzone" class="dropzone-box">
+            <input type="file" id="imageFileInput" accept="image/png,image/jpeg,image/jpg,image/webp" style="display: none;">
+            <div class="dropzone-icon">
+              <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+                <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
+                <circle cx="8.5" cy="8.5" r="1.5"></circle>
+                <polyline points="21 15 16 10 5 21"></polyline>
+              </svg>
+            </div>
+            <h3 class="dropzone-title">Upload Screenshot or News Image</h3>
+            <p class="dropzone-subtitle">Drag and drop WhatsApp screenshots, Instagram posts, or newspaper clippings (PNG, JPG, WEBP)</p>
+          </div>
+
+          <!-- Preview & OCR extraction review -->
+          <div id="imagePreviewContainer" class="extracted-preview-box">
+            <div style="display: grid; grid-template-columns: 240px 1fr; gap: 1.5rem; align-items: start;">
+              <div>
+                <img id="ocrPreviewImg" src="" alt="Uploaded Screenshot" style="width: 100%; border-radius: var(--radius-sm); border: 1px solid var(--border-subtle); object-fit: contain; max-height: 240px; background: #eee;">
+              </div>
+              <div>
+                <div id="ocrStatusWrapper" style="margin-bottom: 0.85rem;">
+                  <div id="ocrProgressStatus" style="font-size: 0.82rem; font-weight: 600; margin-bottom: 0.35rem; color: var(--accent-gold);">Extracting text...</div>
+                  <div class="submeter-track" style="height: 6px;">
+                    <div id="ocrProgressBar" class="submeter-fill" style="width: 10%;"></div>
+                  </div>
+                </div>
+
+                <label class="form-label" for="imageExtractedText">Extracted Text (Confirm or edit before verification):</label>
+                <textarea id="imageExtractedText" class="text-area-input" style="min-height: 120px; margin-bottom: 1rem;"></textarea>
+
+                <div style="text-align: right;">
+                  <button id="btnVerifyImageContent" class="btn-primary">
+                    Verify Extracted Text
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- 4. Voice Panel -->
+        <div id="panel-voice" class="tab-content-panel">
+          <div class="voice-studio-container">
+            <button id="micToggleBtn" class="mic-toggle-btn" title="Click to start speech recognition">
+              <svg width="34" height="34" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"></path>
+                <path d="M19 10v2a7 7 0 0 1-14 0v-2"></path>
+                <line x1="12" y1="19" x2="12" y2="23"></line>
+                <line x1="8" y1="23" x2="16" y2="23"></line>
+              </svg>
+            </button>
+
+            <div id="micStatusLabel" style="font-size: 1.05rem; font-weight: 600; color: var(--text-navy); margin-bottom: 1rem;">
+              Click microphone to record a news claim
+            </div>
+
+            <!-- Animated Waveform -->
+            <div id="voiceWaveform" class="audio-waveform">
+              <div class="waveform-bar"></div>
+              <div class="waveform-bar"></div>
+              <div class="waveform-bar"></div>
+              <div class="waveform-bar"></div>
+              <div class="waveform-bar"></div>
+              <div class="waveform-bar"></div>
+              <div class="waveform-bar"></div>
+            </div>
+
+            <div id="voicePermissionError" style="display: none; color: #DC2626; font-size: 0.88rem; margin: 1rem auto; max-width: 500px;"></div>
+          </div>
+
+          <!-- Transcript Preview & Edit -->
+          <div id="voicePreviewBox" class="extracted-preview-box">
+            <div class="preview-header">
+              <span class="preview-title">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"></path>
+                </svg>
+                Speech Transcript (Review or edit before verification)
+              </span>
+            </div>
+            <textarea id="voiceTranscriptArea" class="text-area-input" style="min-height: 120px; margin-bottom: 1rem;" placeholder="Your spoken words will appear here in real time..."></textarea>
+            
+            <div style="text-align: right;">
+              <button id="btnVerifyVoiceContent" class="btn-primary">
+                Verify Voice Transcript
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <!-- 5. Document Upload Panel -->
+        <div id="panel-doc" class="tab-content-panel">
+          <div id="docDropzone" class="dropzone-box">
+            <input type="file" id="docFileInput" accept=".pdf,.docx,.txt" style="display: none;">
+            <div class="dropzone-icon">
+              <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+                <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+                <polyline points="14 2 14 8 20 8"></polyline>
+              </svg>
+            </div>
+            <h3 class="dropzone-title">Upload Press Release or Document</h3>
+            <p class="dropzone-subtitle">Drop PDF, DOCX, or TXT file here (up to 15 MB)</p>
+          </div>
+          <div id="docErrorAlert" style="display: none; color: #DC2626; font-size: 0.88rem; margin-top: 0.75rem;"></div>
+
+          <!-- Document Review -->
+          <div id="docPreviewBox" class="extracted-preview-box">
+            <div class="preview-header">
+              <span class="preview-title">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+                </svg>
+                Document Content Extracted
+              </span>
+              <span id="docPreviewMeta" style="font-size: 0.8rem; color: var(--text-muted);"></span>
+            </div>
+            <textarea id="docExtractedText" class="text-area-input" style="min-height: 140px; margin-bottom: 1rem;"></textarea>
+            
+            <div style="text-align: right;">
+              <button id="btnVerifyDocContent" class="btn-primary">
+                Verify Document Claims
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Verification Processing / Loading State -->
+      <div id="verificationLoading" class="loading-overlay">
+        <div class="truthlens-spinner"></div>
+        <h3 class="loading-title">Forensic Engine In Progress</h3>
+        <p id="loadingStepMessage" class="loading-step-msg">Step 1/4: Ingesting news claims and computing lexical embeddings...</p>
+      </div>
+
+      <!-- ====================================================================
+           Results Dashboard (Part 4)
+           ==================================================================== -->
+      <div id="resultsDashboard" class="results-container">
+        <div class="result-card-main">
+          <!-- Classification Banner -->
+          <div class="result-banner">
+            <div class="result-badge-cluster">
+              <span id="resClassificationTag" class="classification-tag tag-real">
+                <span>✓</span> REAL
+              </span>
+              <div id="resTimestamp" style="font-size: 0.82rem; color: var(--text-muted);">
+                Verified: Today
+              </div>
+            </div>
+
+            <div class="confidence-metric-box">
+              <div class="metric-gauge">
+                <div class="metric-gauge-label">Combined Confidence</div>
+                <div id="resConfidenceVal" class="metric-gauge-val">88.5%</div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Result Content Body -->
+          <div class="result-content-body">
+            <!-- Executive Summary -->
+            <div class="result-section-title">Executive Summary</div>
+            <div id="resSummaryBox" class="result-summary-box"></div>
+
+            <div class="result-grid-columns">
+              <!-- Left Column: Detailed Explanation & Claims -->
+              <div>
+                <div class="result-section-title">Forensic Analysis & Rationale</div>
+                <p id="resExplanationText" class="result-explanation-p"></p>
+
+                <div class="result-section-title">Key Claims Evaluated</div>
+                <div id="resClaimsList" class="claims-card-list"></div>
+              </div>
+
+              <!-- Right Column: Dual Confidence Meters -->
+              <div>
+                <div class="confidence-submeters">
+                  <div class="result-section-title" style="margin-bottom: 1rem;">Verification Metrics</div>
+                  
+                  <div class="submeter-row">
+                    <div class="submeter-label-row">
+                      <span>ML Linguistic Confidence</span>
+                      <span id="resMlMeterVal">86%</span>
+                    </div>
+                    <div class="submeter-track">
+                      <div id="resMlMeterFill" class="submeter-fill" style="width: 86%;"></div>
+                    </div>
+                  </div>
+
+                  <div class="submeter-row">
+                    <div class="submeter-label-row">
+                      <span>External Evidence Corroboration</span>
+                      <span id="resEvMeterVal">90%</span>
+                    </div>
+                    <div class="submeter-track">
+                      <div id="resEvMeterFill" class="submeter-fill" style="width: 90%; background-color: #065F46;"></div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- ==============================================================
+                 MANDATORY SECTION: Explore More – Verify This News Yourself
+                 ============================================================== -->
+            <div class="sources-verification-container">
+              <div class="sources-headline-group">
+                <h3>Explore More – Verify This News Yourself</h3>
+                <p>TruthLens believes in transparent accountability. Review the primary documentation and independent fact checks directly:</p>
+              </div>
+
+              <div id="resSourcesGrid" class="source-cards-grid"></div>
+              <div id="resNoSourcesAlert" class="no-sources-alert" style="display: none;"></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ========================================================================
+         Verification History Archive (Part 5)
+         ======================================================================== -->
+    <section id="history" class="history-section">
+      <div class="section-header">
+        <span class="section-pill">Persistent Archive</span>
+        <h2 class="section-title">Verification History</h2>
+        <p class="section-subtitle">Browse recent forensic analyses stored in the TruthLens persistent database. Click any entry to inspect its evidence trail.</p>
+      </div>
+
+      <div class="history-filter-bar">
+        <div class="filter-pills-row">
+          <button class="filter-pill-btn active" data-filter="ALL">All Records</button>
+          <button class="filter-pill-btn" data-filter="REAL">Real News</button>
+          <button class="filter-pill-btn" data-filter="FAKE">Misinformation / Fake</button>
+          <button class="filter-pill-btn" data-filter="UNABLE TO VERIFY">Unverified</button>
+        </div>
+
+        <input type="text" id="historySearchInput" class="text-field-input" placeholder="Search past records by keyword..." style="max-width: 320px; padding: 0.5rem 1rem;">
+      </div>
+
+      <div id="historyCardsList" class="history-cards-container">
+        <!-- Injected via JavaScript from SQLite database -->
+      </div>
+    </section>
+
+    <!-- ========================================================================
+         How It Works Section
+         ======================================================================== -->
+    <section id="how-it-works" class="how-section">
+      <div class="how-container">
+        <div class="section-header">
+          <span class="section-pill">Our Methodology</span>
+          <h2 class="section-title">How TruthLens Works</h2>
+          <p class="section-subtitle">Our hybrid verification pipeline couples natural language processing with live external evidence cross-referencing.</p>
+        </div>
+
+        <div class="how-steps-grid">
+          <div class="step-card">
+            <div class="step-num-badge">01</div>
+            <h4 class="step-title">Multi-Modal Ingestion</h4>
+            <p class="step-desc">Accepts text, URLs, screenshots via optical OCR, documents, and live microphone speech.</p>
+          </div>
+
+          <div class="step-card">
+            <div class="step-num-badge">02</div>
+            <h4 class="step-title">Claim Decomposition</h4>
+            <p class="step-desc">Identifies key factual assertions, statistical figures, quotes, and named entities while discarding rhetorical padding.</p>
+          </div>
+
+          <div class="step-card">
+            <div class="step-num-badge">03</div>
+            <h4 class="step-title">Evidence Cross-Reference</h4>
+            <p class="step-desc">Scans peer-reviewed databases, government registries, and certified fact-checking organizations for corroborated records.</p>
+          </div>
+
+          <div class="step-card">
+            <div class="step-num-badge">04</div>
+            <h4 class="step-title">Dual-Engine Triangulation</h4>
+            <p class="step-desc">Combines calibrated ML stylistic probability with external evidence stance to output a transparent confidence rating.</p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ========================================================================
+         About Section
+         ======================================================================== -->
+    <section id="about" class="about-section">
+      <div class="about-card">
+        <span class="section-pill">About TruthLens</span>
+        <h3>Built for Independent Media Accountability</h3>
+        <p>
+          In an era where synthetic disinformation and viral chain messages spread faster than verified reporting, TruthLens provides citizens, researchers, and journalists with an accessible, multi-modal verification cockpit.
+        </p>
+        <p>
+          Unlike black-box classifiers that generate opaque binary labels, TruthLens anchors every verdict to transparent primary sources. We strictly refuse to guarantee 100% certainty, recognizing that rigorous fact-checking requires constant calibration, primary documentation, and independent human judgment.
+        </p>
+      </div>
+    </section>
+  </main>
+
+  <!-- ========================================================================
+       Footer
+       ======================================================================== -->
+  <footer class="footer">
+    <div class="footer-container">
+      <div class="footer-brand">
+        <h4>Truth<span>Lens</span></h4>
+        <p>AI-Powered Fake News Detection & Multi-Modal Verification System. Investigating misinformation across text, screenshots, URLs, and audio.</p>
+      </div>
+
+      <div class="footer-col">
+        <h5>Platform Navigation</h5>
+        <ul class="footer-links">
+          <li><a href="#home">Home</a></li>
+          <li><a href="#verify-workspace">Verify News</a></li>
+          <li><a href="#how-it-works">How It Works</a></li>
+          <li><a href="#history">Verification History</a></li>
+          <li><a href="#about">About TruthLens</a></li>
+        </ul>
+      </div>
+
+      <div class="footer-col">
+        <h5>Verification Integrity</h5>
+        <ul class="footer-links">
+          <li><a href="/docs" target="_blank">OpenAPI Interactive Docs</a></li>
+          <li><a href="#how-it-works">Methodology & Bias Controls</a></li>
+          <li><a href="#about">Ethics & Transparency</a></li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="footer-bottom">
+      <div>&copy; 2026 TruthLens Systems. All rights reserved.</div>
+      <div>AI-Assisted Verification Tool • Not a substitute for primary journalistic investigation.</div>
+    </div>
+  </footer>
+
+  <!-- Application Scripts -->
+  <script src="/static/js/app.js"></script>
+  <script src="/static/js/ocr.js"></script>
+  <script src="/static/js/voice.js"></script>
+</body>
+</html>
