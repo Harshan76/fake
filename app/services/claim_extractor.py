@@ -39,6 +39,9 @@ def extract_named_attributions(text: str) -> List[str]:
         matches = re.finditer(pat, text, re.IGNORECASE)
         for m in matches:
             val = m.group(1).strip()
+            # Clean leading noise such as 'called', 'named', 'known as', 'an organisation called'
+            val = re.sub(r'^(?:an?\s+)?(?:organisation|organization|institution|agency|group)?\s*(?:called|named|known as|dubbed)\s+', '', val, flags=re.IGNORECASE).strip()
+            val = re.sub(r'^(?:the|an?)\s+', '', val, flags=re.IGNORECASE).strip()
             # Clean trailing punctuation
             val = re.sub(r'[,.:;]+$', '', val).strip()
             # Avoid single generic words or excessively long sentences
@@ -54,13 +57,13 @@ def extract_named_attributions(text: str) -> List[str]:
 def distill_claim_keywords(claim: str, max_words: int = 7) -> str:
     """
     Distills a verbose claim sentence into 4-7 salient search keywords.
-    Strips conversational noise and stopwords for optimal search query relevance.
+    Strips conversational noise, punctuation, and stopwords for optimal search query relevance.
     """
     if not claim:
         return ""
 
     # Remove quotes, brackets, and special punctuation
-    clean = re.sub(r'["\'\(\)\[\]\{\},:;!?-]', ' ', claim)
+    clean = re.sub(r'["\'\(\)\[\]\{\},:;!?\-.]', ' ', claim)
     # Strip common conversational phrases
     clean = re.sub(r'\b(forwarded as received|urgent alert|breaking news|doctors stunned|secretly leaked|shocking discovery)\b', '', clean, flags=re.I)
     
@@ -68,12 +71,13 @@ def distill_claim_keywords(claim: str, max_words: int = 7) -> str:
     salient = []
     
     for w in words:
-        w_lower = w.lower()
-        if len(w) > 2 and w_lower not in COMMON_STOPWORDS:
-            salient.append(w)
+        clean_w = w.strip(".,;:?!'\"")
+        w_lower = clean_w.lower()
+        if len(clean_w) > 2 and w_lower not in COMMON_STOPWORDS:
+            salient.append(clean_w)
             
     if not salient:
-        return " ".join(words[:max_words])
+        return " ".join([w.strip(".,;:?!'\"") for w in words[:max_words]])
         
     return " ".join(salient[:max_words])
 

@@ -1,9 +1,9 @@
 import os
 import sys
+import csv
 import json
 import argparse
 import joblib
-import pandas as pd
 from pathlib import Path
 from typing import Tuple, List, Dict, Any
 
@@ -104,24 +104,24 @@ def load_dataset(dataset_path: Path = None) -> Tuple[List[str], List[int], str]:
 
     if target_path:
         try:
-            df = pd.read_csv(target_path)
-            # Find appropriate text and target columns
-            text_col = "text" if "text" in df.columns else ("content" if "content" in df.columns else df.columns[1])
-            target_col = "target" if "target" in df.columns else ("label" if "label" in df.columns else df.columns[-1])
-
-            texts = df[text_col].astype(str).tolist()
-            raw_targets = df[target_col].tolist()
-
+            texts = []
             labels = []
-            for t in raw_targets:
-                val = str(t).strip().upper()
-                if val in ["FAKE", "1", "FALSE"]:
-                    labels.append(1)
-                else:
-                    labels.append(0)
+            with open(target_path, mode="r", encoding="utf-8", errors="ignore") as f:
+                reader = csv.DictReader(f)
+                for row in reader:
+                    text_val = row.get("text") or row.get("content") or ""
+                    target_val = row.get("target") or row.get("label") or "0"
+                    if text_val:
+                        texts.append(text_val)
+                        val = str(target_val).strip().upper()
+                        if val in ["FAKE", "1", "FALSE"]:
+                            labels.append(1)
+                        else:
+                            labels.append(0)
 
-            source_desc = f"CSV dataset from '{target_path.name}' ({len(texts)} samples: {labels.count(0)} REAL, {labels.count(1)} FAKE)"
-            return texts, labels, source_desc
+            if texts:
+                source_desc = f"CSV dataset from '{target_path.name}' ({len(texts)} samples: {labels.count(0)} REAL, {labels.count(1)} FAKE)"
+                return texts, labels, source_desc
         except Exception as e:
             print(f"Warning: Failed loading CSV '{target_path}' ({e}). Utilizing fallback corpus.")
 
