@@ -77,7 +77,8 @@ def synthesize_evidence_with_groq(
     claims: List[str],
     fact_check_reviews: List[Dict[str, Any]],
     tavily_sources: List[Dict[str, Any]],
-    ml_stylometrics: Dict[str, Any]
+    ml_stylometrics: Dict[str, Any],
+    attribution_findings: Optional[List[Dict[str, Any]]] = None
 ) -> Dict[str, Any]:
     """
     Uses Groq to cross-reference extracted claims against retrieved Fact Checks & Tavily web evidence.
@@ -85,7 +86,7 @@ def synthesize_evidence_with_groq(
     """
     if not is_groq_configured():
         return deterministic_evidence_synthesis(
-            article_text, claims, fact_check_reviews, tavily_sources, ml_stylometrics
+            article_text, claims, fact_check_reviews, tavily_sources, ml_stylometrics, attribution_findings
         )
 
     # Format evidence summaries for the prompt
@@ -107,6 +108,7 @@ def synthesize_evidence_with_groq(
             "url": s.get("url"),
             "date": s.get("published_date"),
             "authoritative": s.get("authoritative", False),
+            "stance": s.get("stance", "neutral"),
             "snippet": (s.get("description") or "")[:350]
         })
 
@@ -114,14 +116,20 @@ def synthesize_evidence_with_groq(
         "You are the TruthLens Forensic Evidence Engine. Your duty is to evaluate news authenticity "
         "based STRICTLY on provided external evidence.\n\n"
         "STRICT VERDICT RULES:\n"
-        "1. REAL: Major factual claims are adequately corroborated by credible primary sources or authoritative news, with no material contradictions.\n"
-        "2. FAKE: Major factual claims are directly contradicted by credible evidence, verified fact-checks, or established records.\n"
-        "3. INSUFFICIENT EVIDENCE: Evidence is unavailable, weak, conflicting, or inconclusive. In doubt or when evidence is absent, ALWAYS return INSUFFICIENT EVIDENCE.\n\n"
+        "1. FAKE: Return FAKE when credible evidence directly contradicts a material factual claim or a reliable fact-check explicitly rates it false.\n"
+        "2. REAL: Return REAL when material claims have sufficient credible supporting evidence from authoritative sources, with no unresolved contradictions.\n"
+        "3. INSUFFICIENT EVIDENCE: Return INSUFFICIENT EVIDENCE when neither conclusion is supported, or when evidence is absent, conflicting, or inconclusive.\n\n"
+        "ATTRIBUTION & FICTIONAL ORGANISATIONS:\n"
+        "- When a claim is attributed to an organization, authority, government agency, or committee:\n"
+        "  * Investigate the attribution using authoritative sources.\n"
+        "  * If authoritative sources explicitly confirm the organisation is fictitious, non-existent, or never made the announcement, rate the claim as CONTRADICTED / FAKE.\n"
+        "  * IMPORTANT: Absence of an organisation from search results alone MUST NOT automatically establish that a claim is false (it may be unindexed or local). In such cases, if no direct contradiction exists, classify as INSUFFICIENT EVIDENCE.\n\n"
+        "CONFLICTING EVIDENCE:\n"
+        "- If reputable sources offer conflicting or contradictory accounts on core claims without consensus, return INSUFFICIENT EVIDENCE and note the conflict.\n\n"
         "NEGATIVE CONSTRAINTS:\n"
-        "- NEVER classify as REAL merely because writing sounds professional or grammatical.\n"
-        "- NEVER classify as FAKE merely because text contains sensational words, unless claims are contradicted.\n"
-        "- NEVER fabricate sources, quotes, URLs, or dates not present in the supplied evidence.\n"
-        "- If the article is mixed (some claims true, some false), explain clearly and set verdict to FAKE if core claims are false, or INSUFFICIENT EVIDENCE if partially unresolved.\n\n"
+        "- NEVER classify as REAL merely because writing sounds professional, calm, or grammatical.\n"
+        "- NEVER classify as FAKE merely because text contains sensational words or exclamations, unless claims are contradicted by evidence.\n"
+        "- NEVER fabricate sources, quotes, URLs, or dates not present in the supplied evidence.\n\n"
         "Return ONLY a valid JSON object matching this schema:\n"
         "{\n"
         '  "verdict": "REAL" | "FAKE" | "INSUFFICIENT EVIDENCE",\n'
@@ -151,6 +159,7 @@ def synthesize_evidence_with_groq(
         "extracted_claims": claims,
         "google_fact_check_reviews": fact_check_summary,
         "tavily_web_sources": web_evidence_summary,
+        "attribution_findings": attribution_findings or [],
         "ml_stylometric_indicator": {
             "linguistic_label": ml_stylometrics.get("predicted_label"),
             "fake_probability": ml_stylometrics.get("fake_probability"),
@@ -205,7 +214,7 @@ def synthesize_evidence_with_groq(
     except Exception as e:
         logger.error(f"Groq synthesis failed: {e}. Falling back to deterministic analysis.", exc_info=True)
         return deterministic_evidence_synthesis(
-            article_text, claims, fact_check_reviews, tavily_sources, ml_stylometrics
+            article_text, claims, fact_check_reviews, tavily_sources, ml_stylometrics, attribution_findings
         )
 
 def deterministic_evidence_synthesis(
@@ -213,25 +222,30 @@ def deterministic_evidence_synthesis(
     claims: List[str],
     fact_check_reviews: List[Dict[str, Any]],
     tavily_sources: List[Dict[str, Any]],
-    ml_stylometrics: Dict[str, Any]
+    ml_stylometrics: Dict[str, Any],
+    attribution_findings: Optional[List[Dict[str, Any]]] = None
 ) -> Dict[str, Any]:
     """
     Deterministic fallback rule engine when Groq API is unconfigured or unreachable.
     Evaluates evidence strictly without hallucination:
-    - Debunked fact checks -> FAKE
-    - Authoritative corroboration -> REAL
-    - Missing / ambiguous evidence -> INSUFFICIENT EVIDENCE
+    - Return FAKE when credible evidence directly contradicts a material factual claim or a reliable fact-check explicitly rates it false.
+    - Return REAL when material claims have sufficient credible supporting evidence.
+    - Return INSUFFICIENT EVIDENCE when neither conclusion is supported or evidence is conflicting.
+    - For fictional organisations or demonstrably fabricated attributions: investigate attribution using authoritative sources. Absence of an organisation from search results alone must not automatically establish that a claim is false.
     """
+    from app.services.tavily_search import inspect_source_stance
+
     contradicting = []
     supporting = []
     claim_analyses = []
+    primary_claim = claims[0] if claims else "Primary Claim"
 
     # 1. Inspect Fact-Check Reviews
     for r in fact_check_reviews:
         stance = r.get("stance", "unclear")
         item = {
             "source": r.get("publisher", "Accredited Fact Checker"),
-            "claim_addressed": r.get("claim_addressed", "Claim Review"),
+            "claim_addressed": r.get("claim_addressed", primary_claim),
             "detail": f"Rated as '{r.get('textual_rating')}' by {r.get('publisher')}."
         }
         if stance == "contradicts":
@@ -240,21 +254,47 @@ def deterministic_evidence_synthesis(
             supporting.append(item)
 
     # 2. Inspect Tavily Web Sources
-    auth_sources = [s for s in tavily_sources if s.get("authoritative")]
-    
-    # 3. Determine Verdict
-    if contradicting:
+    for s in tavily_sources:
+        stance = s.get("stance") or inspect_source_stance(s)
+        item = {
+            "source": s.get("publisher", "Web Source"),
+            "claim_addressed": primary_claim,
+            "detail": f"{s.get('title')}: {s.get('description', '')[:220]}"
+        }
+        if stance == "contradicts":
+            if not any(c.get("detail") == item["detail"] for c in contradicting):
+                contradicting.append(item)
+        elif stance == "supports" and s.get("authoritative"):
+            if not any(sup.get("detail") == item["detail"] for sup in supporting):
+                supporting.append(item)
+
+    # 3. Check for conflicting evidence
+    is_conflicting = bool(contradicting and supporting and len(supporting) >= 2 and len(contradicting) >= 1)
+
+    # 4. Determine Verdict
+    if is_conflicting:
+        verdict = "INSUFFICIENT EVIDENCE"
+        confidence = 50.0
+        summary = "Conflicting evidence identified across external authoritative sources."
+        explanation = (
+            "External sources provide conflicting accounts regarding these claims. While some sources corroborate the statements, "
+            "independent investigations or fact checks raise substantial contradictions. Under strict verification standards, "
+            "the claim is classified as INSUFFICIENT EVIDENCE pending decisive consensus."
+        )
+    elif contradicting:
         verdict = "FAKE"
         confidence = 88.0 + min(len(contradicting) * 3, 5.0)
-        summary = f"Claim evaluated as FAKE based on documented fact checks from {contradicting[0]['source']}."
+        source_name = contradicting[0].get("source", "Accredited Source")
+        summary = f"Claim evaluated as FAKE based on documented fact checks and refutations from {source_name}."
         explanation = (
-            "Independent fact-checking investigations directly refute the core claims in this submission. "
-            f"Evidence from {contradicting[0]['source']} confirms these claims are fabricated or misleading."
+            f"Independent fact-checking and published investigations directly refute the core claims in this text. "
+            f"Evidence from {source_name} confirms the assertions are fabricated, disproven, or misleading."
         )
-    elif len(auth_sources) >= 2 and not contradicting:
+    elif len(supporting) >= 2:
         verdict = "REAL"
-        confidence = 78.0 + min(len(auth_sources) * 4, 12.0)
-        summary = f"Factual claims are corroborated by published reports from authoritative sources including {auth_sources[0]['publisher']}."
+        confidence = 78.0 + min(len(supporting) * 4, 12.0)
+        source_name = supporting[0].get("source", "Authoritative Source")
+        summary = f"Factual claims are corroborated by published reports from authoritative sources including {source_name}."
         explanation = (
             "The primary factual assertions are corroborated by multiple independent, authoritative news and institutional sources. "
             "No active debunking alerts or credible contradictions were identified."
@@ -270,16 +310,25 @@ def deterministic_evidence_synthesis(
 
     # Build claim analyses
     for c in claims:
+        c_status = "INSUFFICIENT EVIDENCE"
+        if is_conflicting:
+            c_status = "INSUFFICIENT EVIDENCE"
+        elif contradicting:
+            c_status = "CONTRADICTED"
+        elif verdict == "REAL":
+            c_status = "SUPPORTED"
+
         claim_analyses.append({
             "claim": c,
-            "status": "CONTRADICTED" if contradicting else ("SUPPORTED" if verdict == "REAL" else "INSUFFICIENT EVIDENCE"),
-            "finding": f"Analyzed against {len(fact_check_reviews)} fact checks and {len(tavily_sources)} web sources.",
+            "status": c_status,
+            "finding": f"Evaluated against {len(fact_check_reviews)} fact-check reviews and {len(tavily_sources)} web sources.",
             "sources_used": [s.get("title", "") for s in (fact_check_reviews + tavily_sources)[:2]]
         })
 
     limitations = [
         "Automated cross-referencing against indexed Google Fact Check reviews and Tavily Search results.",
-        "Unindexed offline events or localized breaking news may require manual journalist confirmation."
+        "Absence of an organisation from search results alone does not automatically establish that a claim is false without direct refutation.",
+        "Newly developing breaking events or offline records may require additional manual confirmation."
     ]
 
     return {

@@ -80,10 +80,15 @@ def verify_news_content(text: str, input_type: str = "text", original_url: str =
     # Step 2: Query Google Fact Check Tools API
     fact_check_data = search_claims_fact_checks(identified_claims)
     fact_check_reviews = fact_check_data.get("reviews", [])
+    fact_check_contradicting = fact_check_data.get("contradicting", [])
+    fact_check_supporting = fact_check_data.get("supporting", [])
 
-    # Step 3: Query Tavily Search API for Live Web Evidence
-    tavily_data = search_claims_evidence(identified_claims)
+    # Step 3: Query Tavily Search API for Live Web Evidence & Attributions
+    tavily_data = search_claims_evidence(identified_claims, full_text=clean_text)
     tavily_sources = tavily_data.get("sources", [])
+    tavily_contradicting = tavily_data.get("contradicting", [])
+    tavily_supporting = tavily_data.get("supporting", [])
+    attribution_findings = tavily_data.get("attribution_findings", [])
 
     # Step 4: Check Known Viral Hoax Registry (Direct accredited fact-check URLs)
     hoax_matches = match_known_viral_hoaxes(clean_text)
@@ -152,7 +157,8 @@ def verify_news_content(text: str, input_type: str = "text", original_url: str =
         claims=identified_claims,
         fact_check_reviews=fact_check_reviews,
         tavily_sources=tavily_sources,
-        ml_stylometrics=ml_result
+        ml_stylometrics=ml_result,
+        attribution_findings=attribution_findings
     )
 
     verdict = synthesis.get("verdict", "INSUFFICIENT EVIDENCE")
@@ -164,7 +170,7 @@ def verify_news_content(text: str, input_type: str = "text", original_url: str =
     contradicting_evidence = synthesis.get("contradicting_evidence") or []
     limitations = synthesis.get("limitations") or []
 
-    # Inject any verified registry debunks if not already listed
+    # Merge verified registry debunks into contradicting_evidence
     for r in registry_contradicting:
         if not any(r["claim_addressed"] == c.get("claim_addressed") for c in contradicting_evidence):
             contradicting_evidence.append(r)
@@ -173,9 +179,19 @@ def verify_news_content(text: str, input_type: str = "text", original_url: str =
                 confidence_score = max(confidence_score, 88.0)
                 explanation = f"Documented fact-checking records confirm this is an established viral hoax. {r['detail']}"
 
+    # Merge Tavily debunk items into contradicting_evidence
+    for tc in tavily_contradicting:
+        if not any(tc.get("detail") == c.get("detail") for c in contradicting_evidence):
+            contradicting_evidence.append(tc)
+
+    # Merge supporting items
     for s_item in registry_supporting:
         if not any(s_item["claim_addressed"] == s.get("claim_addressed") for s in supporting_evidence):
             supporting_evidence.append(s_item)
+
+    for ts in tavily_supporting:
+        if not any(ts.get("detail") == s.get("detail") for s in supporting_evidence):
+            supporting_evidence.append(ts)
 
     # Step 8: Calculate Evidence Score
     evidence_score = 45.0
@@ -196,19 +212,34 @@ def verify_news_content(text: str, input_type: str = "text", original_url: str =
             "on the live web. Under strict verification rules, uncorroborated assertions cannot be declared REAL without evidence."
         )
 
-    # Policy 2: Never classify as FAKE solely on sensational style without contradiction
-    if verdict == "FAKE" and len(contradicting_evidence) == 0 and not hoax_matches:
-        if len(supporting_evidence) >= 2:
-            verdict = "REAL"
-        else:
-            verdict = "INSUFFICIENT EVIDENCE"
-            confidence_score = 52.0
-            explanation = (
-                "The text utilizes sensational or clickbait language, but no external evidence directly refutes the claims. "
-                "Classified as INSUFFICIENT EVIDENCE rather than assuming falsehood without factual contradiction."
-            )
+    # Policy 2: Handle FAKE classifications and ensure evidence presence
+    if verdict == "FAKE":
+        if len(contradicting_evidence) == 0 and not hoax_matches:
+            # Check if any claim analysis identified a contradiction
+            contradicted_claims = [ca for ca in claim_analyses if ca.get("status") == "CONTRADICTED"]
+            if contradicted_claims:
+                for ca in contradicted_claims:
+                    src = ca.get("sources_used", ["External Reference"])[0] if ca.get("sources_used") else "Fact Check"
+                    contradicting_evidence.append({
+                        "source": src,
+                        "claim_addressed": ca.get("claim", identified_claims[0] if identified_claims else "Primary Claim"),
+                        "detail": ca.get("finding", "Claim contradicts verified external records.")
+                    })
+            else:
+                verdict = "INSUFFICIENT EVIDENCE"
+                confidence_score = 50.0
+                explanation = (
+                    "While the text exhibits questionable indicators or lacks corroboration, no credible external evidence "
+                    "directly contradicts the material claims. Classified as INSUFFICIENT EVIDENCE rather than assuming falsehood."
+                )
 
-    # Policy 3: Bound confidence between 45.0 and 94.0 (Never claim 100%)
+    # Policy 3: Attribution check without false equivalence
+    if attribution_findings and verdict == "INSUFFICIENT EVIDENCE":
+        limitations.append(
+            "Attributed organisation investigated: Absence from indexed search records alone does not establish falsehood without direct refutation."
+        )
+
+    # Policy 4: Bound confidence between 45.0 and 94.0 (Never claim 100%)
     final_confidence = min(max(confidence_score, 45.0), 94.0)
 
     # Compile explicit service status

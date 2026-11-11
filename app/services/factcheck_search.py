@@ -13,13 +13,15 @@ CONTRADICTING_RATINGS = {
     "false", "pants on fire", "mostly false", "fake", "incorrect", "debunked",
     "misleading", "hoax", "unproven", "fabricated", "scam", "satire", "distorted",
     "partly false", "altered", "manipulated", "lacks context", "two pinocchios",
-    "three pinocchios", "four pinocchios"
+    "three pinocchios", "four pinocchios", "inaccurate", "no evidence",
+    "misattributed", "disproven", "unsubstantiated", "myth", "bogus", "fiction",
+    "erroneous", "unsupported", "legend", "conspiracy", "fake news"
 }
 
 # Positive verdict keywords
 SUPPORTING_RATINGS = {
     "true", "mostly true", "correct", "accurate", "verified", "confirmed",
-    "geppetto checkmark"
+    "geppetto checkmark", "supported", "authentic"
 }
 
 def is_fact_check_configured() -> bool:
@@ -139,7 +141,7 @@ def search_google_fact_check(query: str, language_code: str = "en") -> Dict[str,
 
 def search_claims_fact_checks(claims: List[str]) -> Dict[str, Any]:
     """
-    Searches Google Fact Check Tools across extracted claims.
+    Searches Google Fact Check Tools across extracted claims using distilled and targeted queries.
     Collects established reviews and partitions into contradicting and supporting items.
     """
     if not is_fact_check_configured() or not claims:
@@ -150,16 +152,29 @@ def search_claims_fact_checks(claims: List[str]) -> Dict[str, Any]:
             "supporting": []
         }
 
+    from app.services.claim_extractor import generate_verification_queries
+
     all_reviews: List[Dict[str, Any]] = []
     seen_urls = set()
 
     for claim in claims[:3]:
-        res = search_google_fact_check(claim)
-        if res.get("success"):
-            for r in res.get("reviews", []):
-                if r["url"] and r["url"] not in seen_urls:
-                    seen_urls.add(r["url"])
-                    all_reviews.append(r)
+        query_pkg = generate_verification_queries(claim)
+        queries_to_try = []
+        if query_pkg.get("distilled_query"):
+            queries_to_try.append(query_pkg["distilled_query"])
+        # Also try the raw claim if reasonably concise
+        if len(claim.split()) <= 12 and claim not in queries_to_try:
+            queries_to_try.append(claim)
+
+        for q in queries_to_try:
+            res = search_google_fact_check(q)
+            if res.get("success"):
+                for r in res.get("reviews", []):
+                    if r["url"] and r["url"] not in seen_urls:
+                        seen_urls.add(r["url"])
+                        all_reviews.append(r)
+                if all_reviews:
+                    break  # Found relevant fact-checks for this claim
 
     contradicting = [r for r in all_reviews if r.get("stance") == "contradicts"]
     supporting = [r for r in all_reviews if r.get("stance") == "supports"]
