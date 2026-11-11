@@ -1,8 +1,20 @@
 import re
-from typing import Dict, Any, List
+import logging
+from typing import Dict, Any, List, Optional
+
+from app.config import get_provider_capabilities, USER_AGENT
 from app.ml.classifier import predict_text_credibility
 from app.services.claim_extractor import extract_key_claims
-from app.services.evidence_search import find_credible_evidence
+from app.services.tavily_search import search_claims_evidence, is_tavily_configured
+from app.services.factcheck_search import search_claims_fact_checks, is_fact_check_configured
+from app.services.groq_verifier import (
+    extract_claims_with_groq,
+    synthesize_evidence_with_groq,
+    is_groq_configured
+)
+from app.services.evidence_search import match_known_viral_hoaxes
+
+logger = logging.getLogger("truthlens.verifier")
 
 def generate_summary(text: str, max_words: int = 40) -> str:
     """Generates an objective 1-2 sentence executive summary of the content."""
@@ -22,126 +34,219 @@ def generate_summary(text: str, max_words: int = 40) -> str:
 
 def verify_news_content(text: str, input_type: str = "text", original_url: str = None) -> Dict[str, Any]:
     """
-    Core TruthLens Verification Pipeline:
-    Step 1: Extract & clean news content.
-    Step 2: Identify core factual claims.
-    Step 3: Query credible knowledge sources & fact-check repositories.
-    Step 4: Analyze linguistic markers & execute ML classification.
-    Step 5: Triangulate external evidence stance with model predictions.
-    Step 6: Classify as REAL, FAKE, or UNABLE TO VERIFY.
-    Step 7: Compute calibrated confidence score and build comprehensive breakdown.
+    TruthLens Dynamic Evidence-Based Verification Pipeline:
+    1. Ingest & sanitize news content.
+    2. Extract falsifiable factual claims (via Groq / NLP).
+    3. Search Google Fact Check Tools API for prior peer-reviewed claims.
+    4. Search Tavily Search API for live web evidence (corroborating and debunking).
+    5. Check accredited viral hoax debunks (WHO, Reuters, Snopes).
+    6. Execute ML stylometric analysis as a secondary linguistic indicator.
+    7. Synthesize evidence via Groq LLM (or deterministic fallback) with strict verdict rules:
+       - 'REAL': Adequately corroborated by credible evidence with no material contradictions.
+       - 'FAKE': Contradicted by credible evidence or established fact-checks.
+       - 'INSUFFICIENT EVIDENCE': Evidence unavailable, weak, conflicting, or unverified.
+    8. Format comprehensive output with source references and verification limitations.
     """
     clean_text = text.strip() if text else ""
+    capabilities = get_provider_capabilities()
+
+    # Guardrail: Content too brief to extract claims
     if len(clean_text) < 15:
         return {
-            "classification": "UNABLE TO VERIFY",
-            "confidence_score": 40.0,
+            "classification": "INSUFFICIENT EVIDENCE",
+            "confidence_score": 45.0,
             "ml_confidence": 0.0,
             "evidence_score": 0.0,
             "summary": "The submitted content is too brief to extract verifiable claims.",
-            "explanation": "TruthLens requires sufficient factual context (minimum 15 characters or a complete sentence) to analyze claims against credible databases.",
+            "explanation": "TruthLens requires sufficient factual context (minimum 15 characters or a complete sentence) to extract and cross-reference claims against external evidence.",
             "identified_claims": [],
+            "claim_analyses": [],
             "supporting_evidence": [],
             "contradicting_evidence": [],
-            "sources": []
+            "sources": [],
+            "service_status": capabilities,
+            "limitations": ["Input text below minimum analytical threshold."],
+            "ml_prediction": None,
+            "status": "COMPLETED"
         }
 
-    # Step 2: Extract claims
-    identified_claims = extract_key_claims(clean_text)
+    # Step 1: Identify Key Factual Claims (Groq with fallback to NLP)
+    identified_claims = extract_claims_with_groq(clean_text)
+    if not identified_claims:
+        identified_claims = extract_key_claims(clean_text)
+    if not identified_claims and clean_text:
+        identified_claims = [clean_text[:160] + ("..." if len(clean_text) > 160 else "")]
 
-    # Step 3 & 4: Search for external evidence
-    evidence_data = find_credible_evidence(identified_claims, clean_text)
-    sources = evidence_data["sources"]
-    supporting_evidence = evidence_data["supporting_evidence"]
-    contradicting_evidence = evidence_data["contradicting_evidence"]
-    evidence_score = evidence_data["evidence_score"]
-    evidence_stance = evidence_data["stance"]
+    # Step 2: Query Google Fact Check Tools API
+    fact_check_data = search_claims_fact_checks(identified_claims)
+    fact_check_reviews = fact_check_data.get("reviews", [])
 
-    # Step 5: ML Stylometric & NLP inference
-    ml_result = predict_text_credibility(clean_text)
-    ml_label = ml_result["predicted_label"]
-    ml_conf = ml_result["model_confidence"]
-    fake_prob = ml_result["fake_probability"]
-    real_prob = ml_result["real_probability"]
-    markers = ml_result["linguistic_markers"]
+    # Step 3: Query Tavily Search API for Live Web Evidence
+    tavily_data = search_claims_evidence(identified_claims)
+    tavily_sources = tavily_data.get("sources", [])
 
-    # Step 6: Triangulation & Decision Logic
-    # Case A: Debunking / Contradicting evidence found
-    if evidence_stance == "contradicts" or len(contradicting_evidence) > 0:
-        classification = "FAKE"
-        # Weight evidence heavily over text style
-        confidence_score = (evidence_score * 0.70) + (fake_prob * 0.30)
-        explanation = (
-            "This item was classified as FAKE because documented fact-checking evidence and official records "
-            "directly contradict the claims made. External investigations have previously debunked similar assertions, "
-            f"and linguistic analysis indicates {fake_prob:.1f}% stylistic alignment with misleading or sensationalized content."
-        )
-
-    # Case B: Verified supporting evidence found from credible institutions
-    elif evidence_stance == "supports" and len(supporting_evidence) >= 2:
-        if fake_prob > 80.0 and markers.get("sensational_score", 0) > 4:
-            # Stylistically sensationalized but has supporting facts -> nuance
-            classification = "UNABLE TO VERIFY"
-            confidence_score = 58.0
-            explanation = (
-                "While some factual entities or events in this submission match published news reports, "
-                "the text employs intense sensationalist framing and unverified exaggerations. "
-                "Because verified facts are mixed with sensational rhetoric, TruthLens advises reader discretion."
-            )
+    # Step 4: Check Known Viral Hoax Registry (Direct accredited fact-check URLs)
+    hoax_matches = match_known_viral_hoaxes(clean_text)
+    registry_contradicting = []
+    registry_supporting = []
+    for h in hoax_matches:
+        item = {
+            "source": h["publisher"],
+            "claim_addressed": h["title"],
+            "detail": h["description"]
+        }
+        if h["stance"] == "contradicts":
+            registry_contradicting.append(item)
         else:
-            classification = "REAL"
-            confidence_score = (evidence_score * 0.65) + (real_prob * 0.35)
-            explanation = (
-                "This report was classified as REAL because the core factual claims correspond with established records, "
-                "credible encyclopedic documentation, or reputable news coverage. The linguistic tone adheres to standard "
-                "journalistic attribution without artificial viral triggers."
-            )
+            registry_supporting.append(item)
 
-    # Case C: Stylistically high fake probability with sensationalist markers, but no external evidence
-    elif fake_prob >= 75.0 and markers.get("sensational_score", 0) >= 2:
-        classification = "FAKE"
-        confidence_score = min(fake_prob * 0.85, 84.0)  # Bound to avoid false certainty
-        explanation = (
-            "This content exhibits strong structural and linguistic patterns typical of disinformation campaigns and clickbait hoaxes: "
-            f"heightened sensationalism (score: {markers.get('sensational_score', 0)}/10), urgent sharing directives, "
-            "and a total absence of corroboration in standard news archives or scientific databases."
-        )
+    # Step 5: Execute ML Stylometric Analysis (Auxiliary indicator only)
+    ml_result = predict_text_credibility(clean_text)
+    ml_label = ml_result.get("predicted_label", "UNABLE TO VERIFY")
+    ml_conf = ml_result.get("model_confidence", 50.0)
 
-    # Case D: High journalistic style with clear attribution
-    elif real_prob >= 75.0 and markers.get("journalistic_attribution", 0) >= 1.5:
-        classification = "REAL"
-        confidence_score = min(real_prob * 0.85, 82.0)
-        explanation = (
-            "The content demonstrates authentic journalistic structure, balanced factual tone, and verifiable institutional attribution. "
-            "No known debunking reports or disinformation flags were associated with this text."
-        )
+    # Step 6: Consolidate External Evidence Sources (Deduplicated)
+    all_sources: List[Dict[str, Any]] = []
+    seen_urls = set()
 
-    # Case E: Inconclusive / Insufficient evidence
-    else:
-        classification = "UNABLE TO VERIFY"
+    # Priority 1: Fact Check Reviews
+    for r in fact_check_reviews:
+        url = r.get("url", "#")
+        if url and url not in seen_urls:
+            seen_urls.add(url)
+            all_sources.append({
+                "title": r.get("title") or f"Fact Check: {r.get('publisher')}",
+                "publisher": r.get("publisher", "Accredited Fact Checker"),
+                "url": url,
+                "description": r.get("description", ""),
+                "published_date": r.get("review_date"),
+                "reliability": "Very High",
+                "source_type": "fact_check_review"
+            })
+
+    # Priority 2: Verified Registry Matches
+    for h in hoax_matches:
+        url = h.get("url", "#")
+        if url and url not in seen_urls:
+            seen_urls.add(url)
+            all_sources.append({
+                "title": h.get("title"),
+                "publisher": h.get("publisher"),
+                "url": url,
+                "description": h.get("description"),
+                "published_date": None,
+                "reliability": "Very High",
+                "source_type": "verified_registry"
+            })
+
+    # Priority 3: Tavily Live Web Results
+    for s in tavily_sources:
+        url = s.get("url", "#")
+        if url and url not in seen_urls:
+            seen_urls.add(url)
+            all_sources.append(s)
+
+    # Step 7: Synthesize Evidence via Groq (or deterministic rule engine)
+    synthesis = synthesize_evidence_with_groq(
+        article_text=clean_text,
+        claims=identified_claims,
+        fact_check_reviews=fact_check_reviews,
+        tavily_sources=tavily_sources,
+        ml_stylometrics=ml_result
+    )
+
+    verdict = synthesis.get("verdict", "INSUFFICIENT EVIDENCE")
+    confidence_score = float(synthesis.get("confidence_score", 50.0))
+    summary = synthesis.get("summary") or generate_summary(clean_text)
+    explanation = synthesis.get("explanation") or ""
+    claim_analyses = synthesis.get("claim_analyses") or []
+    supporting_evidence = synthesis.get("supporting_evidence") or []
+    contradicting_evidence = synthesis.get("contradicting_evidence") or []
+    limitations = synthesis.get("limitations") or []
+
+    # Inject any verified registry debunks if not already listed
+    for r in registry_contradicting:
+        if not any(r["claim_addressed"] == c.get("claim_addressed") for c in contradicting_evidence):
+            contradicting_evidence.append(r)
+            if verdict != "FAKE":
+                verdict = "FAKE"
+                confidence_score = max(confidence_score, 88.0)
+                explanation = f"Documented fact-checking records confirm this is an established viral hoax. {r['detail']}"
+
+    for s_item in registry_supporting:
+        if not any(s_item["claim_addressed"] == s.get("claim_addressed") for s in supporting_evidence):
+            supporting_evidence.append(s_item)
+
+    # Step 8: Calculate Evidence Score
+    evidence_score = 45.0
+    if contradicting_evidence:
+        evidence_score = 88.0 + min(len(contradicting_evidence) * 3, 6.0)
+    elif supporting_evidence and len(supporting_evidence) >= 2:
+        evidence_score = 75.0 + min(len(supporting_evidence) * 4, 15.0)
+    elif all_sources:
+        evidence_score = 55.0
+
+    # Step 9: Final Quality & Strict Policy Assurance
+    # Policy 1: Never classify as REAL without supporting evidence
+    if verdict == "REAL" and len(supporting_evidence) == 0 and len(all_sources) < 2:
+        verdict = "INSUFFICIENT EVIDENCE"
         confidence_score = 50.0
         explanation = (
-            "TruthLens found insufficient external evidence to definitively classify this content as either authentic or fabricated. "
-            "The text lacks clear contradiction by established fact-checkers, yet also lacks decisive corroboration from independent primary sources. "
-            "We strongly encourage manually verifying the original sources linked below."
+            "While the text exhibits a journalistic style, TruthLens could not find sufficient primary source corroboration "
+            "on the live web. Under strict verification rules, uncorroborated assertions cannot be declared REAL without evidence."
         )
 
-    # Cap confidence score realistically (Never claim 100%)
+    # Policy 2: Never classify as FAKE solely on sensational style without contradiction
+    if verdict == "FAKE" and len(contradicting_evidence) == 0 and not hoax_matches:
+        if len(supporting_evidence) >= 2:
+            verdict = "REAL"
+        else:
+            verdict = "INSUFFICIENT EVIDENCE"
+            confidence_score = 52.0
+            explanation = (
+                "The text utilizes sensational or clickbait language, but no external evidence directly refutes the claims. "
+                "Classified as INSUFFICIENT EVIDENCE rather than assuming falsehood without factual contradiction."
+            )
+
+    # Policy 3: Bound confidence between 45.0 and 94.0 (Never claim 100%)
     final_confidence = min(max(confidence_score, 45.0), 94.0)
 
-    # Executive summary
-    summary = generate_summary(clean_text)
+    # Compile explicit service status
+    service_status = {
+        "tavily_search": is_tavily_configured(),
+        "google_fact_check": is_fact_check_configured(),
+        "groq_reasoning": is_groq_configured(),
+        "ml_classifier": capabilities.get("ml_classifier", True)
+    }
 
+    # Add general limitations if missing
+    if not limitations:
+        limitations = [
+            "Evaluated against indexed Google Fact Check reviews and Tavily Search results.",
+            "Newly developing breaking events or offline records may require additional manual confirmation."
+        ]
+
+    # Backward compatibility: for database / API clients expecting UNABLE TO VERIFY
+    # The primary classification remains 'INSUFFICIENT EVIDENCE' (or 'REAL'/'FAKE')
     return {
-        "classification": classification,
+        "classification": verdict,
         "confidence_score": round(final_confidence, 1),
         "ml_confidence": round(ml_conf, 1),
         "evidence_score": round(evidence_score, 1),
         "summary": summary,
         "explanation": explanation,
         "identified_claims": identified_claims,
+        "claim_analyses": claim_analyses,
         "supporting_evidence": supporting_evidence,
         "contradicting_evidence": contradicting_evidence,
-        "sources": sources,
-        "linguistic_markers": markers
+        "sources": all_sources[:8],
+        "service_status": service_status,
+        "limitations": limitations,
+        "ml_prediction": {
+            "predicted_label": ml_label,
+            "fake_probability": ml_result.get("fake_probability", 50.0),
+            "real_probability": ml_result.get("real_probability", 50.0),
+            "role": "Auxiliary stylometric linguistic indicator (not factual proof)"
+        },
+        "status": "COMPLETED"
     }

@@ -450,15 +450,17 @@ class TruthLensApp {
     const tagElem = document.getElementById("resClassificationTag");
     if (tagElem) {
       tagElem.className = "classification-tag";
-      if (result.classification === "REAL") {
+      const cls = (result.classification || "INSUFFICIENT EVIDENCE").toUpperCase();
+      if (cls === "REAL") {
         tagElem.classList.add("tag-real");
         tagElem.innerHTML = `<span>✓</span> REAL`;
-      } else if (result.classification === "FAKE") {
+      } else if (cls === "FAKE") {
         tagElem.classList.add("tag-fake");
         tagElem.innerHTML = `<span>⚠</span> FAKE`;
       } else {
         tagElem.classList.add("tag-unverified");
-        tagElem.innerHTML = `<span>?</span> UNABLE TO VERIFY`;
+        const displayLabel = cls.includes("INSUFFICIENT") ? "INSUFFICIENT EVIDENCE" : "UNABLE TO VERIFY";
+        tagElem.innerHTML = `<span>?</span> ${displayLabel}`;
       }
     }
 
@@ -496,19 +498,39 @@ class TruthLensApp {
       explanationElem.textContent = result.explanation;
     }
 
-    // 5. Extracted Claims List
+    // 5. Extracted Claims List (supports both plain claims and structured claim_analyses)
     const claimsContainer = document.getElementById("resClaimsList");
     if (claimsContainer) {
       claimsContainer.innerHTML = "";
-      if (result.identified_claims && result.identified_claims.length > 0) {
-        result.identified_claims.forEach((claim, idx) => {
-          const item = document.createElement("div");
-          item.className = "claim-item-card";
-          item.innerHTML = `
+      const analyses = result.claim_analyses && result.claim_analyses.length > 0
+        ? result.claim_analyses
+        : (result.identified_claims || []).map(c => typeof c === 'string' ? { claim: c, status: null } : c);
+
+      if (analyses.length > 0) {
+        analyses.forEach((item, idx) => {
+          const card = document.createElement("div");
+          card.className = "claim-item-card";
+          const claimText = typeof item === 'string' ? item : (item.claim || "");
+          const status = item.status ? item.status.toUpperCase() : null;
+          let badgeHtml = "";
+          if (status === "SUPPORTED") {
+            badgeHtml = `<span style="font-size: 0.72rem; padding: 0.15rem 0.5rem; background: #ECFDF5; color: #065F46; border-radius: 9999px; font-weight: 700; margin-left: 0.5rem;">CORROBORATED</span>`;
+          } else if (status === "CONTRADICTED") {
+            badgeHtml = `<span style="font-size: 0.72rem; padding: 0.15rem 0.5rem; background: #FEF2F2; color: #991B1B; border-radius: 9999px; font-weight: 700; margin-left: 0.5rem;">CONTRADICTED</span>`;
+          } else if (status) {
+            badgeHtml = `<span style="font-size: 0.72rem; padding: 0.15rem 0.5rem; background: #F3F4F6; color: #4B5563; border-radius: 9999px; font-weight: 700; margin-left: 0.5rem;">INSUFFICIENT EVIDENCE</span>`;
+          }
+
+          const findingHtml = item.finding ? `<div style="font-size: 0.82rem; color: var(--text-muted); margin-top: 0.35rem;">${this.escapeHtml(item.finding)}</div>` : "";
+
+          card.innerHTML = `
             <div class="claim-index-bullet">${idx + 1}</div>
-            <div class="claim-text-content">${this.escapeHtml(claim)}</div>
+            <div class="claim-text-content">
+              <div><strong>Claim:</strong> ${this.escapeHtml(claimText)} ${badgeHtml}</div>
+              ${findingHtml}
+            </div>
           `;
-          claimsContainer.appendChild(item);
+          claimsContainer.appendChild(card);
         });
       } else {
         claimsContainer.innerHTML = `<div style="color: var(--text-muted); font-size: 0.9rem;">No distinct atomic claims identified.</div>`;
@@ -573,9 +595,14 @@ class TruthLensApp {
           card.href = src.url;
           card.target = "_blank";
           card.rel = "noopener noreferrer";
+          const typeBadge = src.source_type === "fact_check_review"
+            ? '<span style="color: #B87927; font-weight: 700;">[Fact Check Review]</span> '
+            : (src.source_type === "verified_registry" ? '<span style="color: #DC2626; font-weight: 700;">[Accredited Debunk]</span> ' : '');
+          const pubDate = src.published_date ? ` • ${this.escapeHtml(String(src.published_date).slice(0, 10))}` : "";
+
           card.innerHTML = `
             <div class="source-pub-tag">
-              <span>●</span> ${this.escapeHtml(src.publisher || 'Verified Source')}
+              <span>●</span> ${typeBadge}${this.escapeHtml(src.publisher || 'Verified Source')}${pubDate}
             </div>
             <h4 class="source-card-title">${this.escapeHtml(src.title)}</h4>
             <p class="source-card-desc">${this.escapeHtml(src.description || 'Verified evidence documentation and news reporting.')}</p>
@@ -600,6 +627,31 @@ class TruthLensApp {
       const idSnippet = result.id ? result.id.slice(0, 8) : "";
       timeElem.textContent = `Verified: ${d.toLocaleString()}${idSnippet ? ` • ID: ${idSnippet}` : ""}`;
     }
+
+    // 9. Limitations & Provider Status Notice
+    let limitationsBox = document.getElementById("resLimitationsNotice");
+    if (!limitationsBox) {
+      limitationsBox = document.createElement("div");
+      limitationsBox.id = "resLimitationsNotice";
+      limitationsBox.style.cssText = "margin: 1.5rem 2rem 2rem 2rem; padding: 1rem 1.25rem; background: #FAF9F6; border: 1px solid var(--border-subtle); border-radius: var(--radius-sm); font-size: 0.82rem; color: var(--text-muted); line-height: 1.5;";
+      const mainCard = resultsContainer.querySelector(".result-card-main");
+      if (mainCard) mainCard.appendChild(limitationsBox);
+    }
+    const prov = result.service_status || {};
+    const provBadges = `
+      <div style="display: flex; gap: 0.5rem; flex-wrap: wrap; margin-bottom: 0.5rem;">
+        <span style="padding: 0.15rem 0.5rem; border-radius: 4px; font-weight: 600; background: ${prov.google_fact_check ? '#ECFDF5; color: #065F46;' : '#F3F4F6; color: #6B7280;'}">Google Fact Check: ${prov.google_fact_check ? 'Active' : 'Unconfigured'}</span>
+        <span style="padding: 0.15rem 0.5rem; border-radius: 4px; font-weight: 600; background: ${prov.tavily_search ? '#ECFDF5; color: #065F46;' : '#F3F4F6; color: #6B7280;'}">Tavily Search: ${prov.tavily_search ? 'Active' : 'Unconfigured'}</span>
+        <span style="padding: 0.15rem 0.5rem; border-radius: 4px; font-weight: 600; background: ${prov.groq_reasoning ? '#ECFDF5; color: #065F46;' : '#F3F4F6; color: #6B7280;'}">Groq Engine: ${prov.groq_reasoning ? 'Active' : 'Rule Engine Fallback'}</span>
+        <span style="padding: 0.15rem 0.5rem; border-radius: 4px; font-weight: 600; background: #ECFDF5; color: #065F46;">ML Stylometrics: Active</span>
+      </div>
+    `;
+    const limitsList = (result.limitations || []).map(l => `<li>${this.escapeHtml(l)}</li>`).join("");
+    limitationsBox.innerHTML = `
+      <div style="font-weight: 700; color: var(--text-navy); margin-bottom: 0.35rem;">Dynamic Verification Providers & Limitations:</div>
+      ${provBadges}
+      <ul style="margin: 0.25rem 0 0 1.25rem; padding: 0;">${limitsList || '<li>Live dynamic cross-referencing against Google Fact Check Tools and Tavily Search results.</li>'}</ul>
+    `;
 
     // Show result and scroll smoothly
     resultsContainer.classList.add("active");

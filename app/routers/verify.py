@@ -67,7 +67,12 @@ def verify_endpoint(payload: VerificationRequest, db: Session = Depends(get_db))
         db.add(record)
         db.commit()
         db.refresh(record)
-        return record.to_dict()
+        resp_data = record.to_dict()
+        resp_data["service_status"] = result.get("service_status", {})
+        resp_data["claim_analyses"] = result.get("claim_analyses", [])
+        resp_data["limitations"] = result.get("limitations", [])
+        resp_data["ml_prediction"] = result.get("ml_prediction")
+        return resp_data
     except Exception as db_err:
         db.rollback()
         logger.error(f"Database error while saving verification record: {db_err}")
@@ -84,9 +89,13 @@ def verify_endpoint(payload: VerificationRequest, db: Session = Depends(get_db))
             "summary": result.get("summary"),
             "explanation": result["explanation"],
             "identified_claims": result.get("identified_claims", []),
+            "claim_analyses": result.get("claim_analyses", []),
             "supporting_evidence": result.get("supporting_evidence", []),
             "contradicting_evidence": result.get("contradicting_evidence", []),
             "sources": result.get("sources", []),
+            "service_status": result.get("service_status", {}),
+            "limitations": result.get("limitations", []),
+            "ml_prediction": result.get("ml_prediction"),
             "status": "COMPLETED",
             "timestamp": rec_time.isoformat()
         }

@@ -44,16 +44,20 @@ class VerificationResponse(BaseModel):
     submitted_content: str
     extracted_text: Optional[str] = None
     original_url: Optional[str] = None
-    classification: str = "UNABLE TO VERIFY"  # 'REAL', 'FAKE', 'UNABLE TO VERIFY'
+    classification: str = "INSUFFICIENT EVIDENCE"  # 'REAL', 'FAKE', 'INSUFFICIENT EVIDENCE' (or 'UNABLE TO VERIFY')
     confidence_score: float = 50.0
     ml_confidence: Optional[float] = None
     evidence_score: Optional[float] = None
     summary: Optional[str] = None
     explanation: str = ""
     identified_claims: List[Any] = []
+    claim_analyses: List[Dict[str, Any]] = []
     supporting_evidence: List[Dict[str, Any]] = []
     contradicting_evidence: List[Dict[str, Any]] = []
     sources: List[Dict[str, Any]] = []
+    service_status: Dict[str, Any] = {}
+    limitations: List[str] = []
+    ml_prediction: Optional[Dict[str, Any]] = None
     status: str = "COMPLETED"
     timestamp: Optional[str] = None
 

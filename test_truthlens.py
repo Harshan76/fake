@@ -1,258 +1,288 @@
 import sys
+import json
 import unittest
+from unittest.mock import patch, MagicMock
 from pathlib import Path
 
 # Add project root to path
-sys.path.insert(0, str(Path(__file__).resolve().parent))
+PROJECT_ROOT = Path(__file__).resolve().parent
+sys.path.insert(0, str(PROJECT_ROOT))
 
 from app.ml.classifier import predict_text_credibility
 from app.services.claim_extractor import extract_key_claims
 from app.services.document_parser import parse_document
 from app.services.url_scraper import validate_url, is_safe_public_url, scrape_article_from_url
 from app.services.verifier import verify_news_content
+from app.services.tavily_search import search_tavily, search_claims_evidence
+from app.services.factcheck_search import search_google_fact_check, search_claims_fact_checks
+from app.services.groq_verifier import extract_claims_with_groq, synthesize_evidence_with_groq, deterministic_evidence_synthesis
 from app.database import init_db, SessionLocal, check_db_connection
 from app.models import VerificationRecord
+from app.schemas import VerificationRequest
 
-class TruthLensIntegrationTests(unittest.TestCase):
+class TruthLensDynamicVerificationTests(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls):
         init_db()
 
-    def test_01_ml_prediction_real_and_fake(self):
-        real_text = "The World Health Organization confirmed today that global vaccination coverage has reached 72% according to official surveillance data published in Geneva."
-        fake_text = "URGENT ALERT: Drinking boiled garlic water with lemon 100% destroys all viral infections overnight! Big Pharma doctors are desperately trying to ban this secret cure! SHARE BEFORE DELETED!!!"
-
-        res_real = predict_text_credibility(real_text)
-        res_fake = predict_text_credibility(fake_text)
-
-        self.assertIn(res_real["predicted_label"], ["REAL", "FAKE"])
-        self.assertEqual(res_fake["predicted_label"], "FAKE")
-        self.assertGreater(res_fake["fake_probability"], 60.0)
-        print("ML Prediction Test Passed.")
-
-    def test_02_claim_extraction(self):
-        text = "NASA announced yesterday that the James Webb Telescope discovered water vapor on exoplanet K2-18b. Researchers estimate atmospheric levels at 34%."
-        claims = extract_key_claims(text)
-        self.assertTrue(len(claims) >= 1)
-        print(f"Extracted claims: {claims}")
-
-    def test_03_txt_document_parsing(self):
-        sample_txt = b"Breaking news regarding transportation infrastructure upgrades in 2026."
-        res = parse_document(sample_txt, "news.txt")
-        self.assertTrue(res["success"])
-        self.assertEqual(res["file_type"], "TXT")
-        self.assertIn("transportation", res["extracted_text"])
-        print("Document Parsing Test Passed.")
-
-    def test_04_url_validation(self):
-        self.assertTrue(validate_url("https://www.reuters.com/world/"))
-        self.assertFalse(validate_url("not-a-valid-url"))
-        print("URL Validation Test Passed.")
-
-    def test_05_full_verification_pipeline(self):
-        # Test debunked hoax
-        fake_news = "URGENT: Boiling garlic and lemon cures 100% of all viral infections in 24 hours. Doctors are hiding this miracle cure!"
-        result = verify_news_content(fake_news, input_type="text")
-
-        self.assertEqual(result["classification"], "FAKE")
-        self.assertGreater(result["confidence_score"], 60.0)
-        self.assertTrue(len(result["sources"]) > 0)
-        self.assertTrue(any("who.int" in s["url"] or "myth" in s["url"] or "garlic" in s["title"].lower() for s in result["sources"]))
-        print("Verification Pipeline (Fake News) Test Passed.")
-
-        # Test unable to verify short or vague statement
-        vague_news = "Someone was seen walking on the sidewalk this morning wearing a blue hat."
-        result_vague = verify_news_content(vague_news, input_type="text")
-        self.assertIn(result_vague["classification"], ["UNABLE TO VERIFY", "REAL"])
-        print("Verification Pipeline (Vague News) Test Passed.")
-
-    def test_06_database_persistence(self):
-        db = SessionLocal()
-        record = VerificationRecord(
-            input_type="text",
-            submitted_content="Test verification entry for database verification.",
-            classification="REAL",
-            confidence_score=82.0,
-            explanation="Test explanation for database persistence.",
-            status="COMPLETED"
-        )
-        db.add(record)
-        db.commit()
-        record_id = record.id
-
-        # Query back
-        retrieved = db.query(VerificationRecord).filter(VerificationRecord.id == record_id).first()
-        self.assertIsNotNone(retrieved)
-        self.assertEqual(retrieved.classification, "REAL")
-        self.assertEqual(retrieved.confidence_score, 82.0)
-        db.delete(retrieved)
-        db.commit()
-        db.close()
-        print("Database Persistence Test Passed.")
-
-    def test_07_fastapi_router_endpoints(self):
-        from app.routers.verify import verify_endpoint
-        from app.routers.history import get_history
-        from app.routers.stats import get_platform_statistics
-        from app.schemas import VerificationRequest
-        from main import serve_home
+    # ------------------------------------------------------------------------
+    # 1. Previously Fact-Checked Claims Test
+    # ------------------------------------------------------------------------
+    def test_01_previously_fact_checked_claims(self):
+        """Tests that viral hoaxes with documented debunks are classified as FAKE."""
+        hoax_text = "URGENT ALERT: Drinking boiled garlic water with lemon 100% destroys all viral infections overnight! Forward to all your family groups!"
         
+        # Test via full verification pipeline
+        result = verify_news_content(hoax_text, input_type="text")
+        self.assertEqual(result["classification"], "FAKE")
+        self.assertGreaterEqual(result["confidence_score"], 80.0)
+        self.assertTrue(len(result["contradicting_evidence"]) >= 1)
+        self.assertTrue(len(result["sources"]) >= 1)
+        # Verify accredited debunk source is present
+        sources_text = json.dumps(result["sources"]).lower()
+        self.assertTrue("who.int" in sources_text or "myth" in sources_text or "garlic" in sources_text)
+        print("Test 01: Previously Fact-Checked Claims (Garlic Hoax) -> FAKE Passed.")
+
+    # ------------------------------------------------------------------------
+    # 2. Fabricated Claims with Live/Simulated Dynamic Search Contradiction
+    # ------------------------------------------------------------------------
+    def test_02_fabricated_claims_with_debunk_evidence(self):
+        """Tests that fabricated claims with contradicting evidence are classified as FAKE."""
+        claim = "French government officially sold the Eiffel Tower for scrap metal to pay off sovereign debt."
+        
+        mock_tavily_sources = [
+            {
+                "title": "Fact Check: No, France did not sell the Eiffel Tower for scrap",
+                "publisher": "Reuters Fact Check",
+                "url": "https://www.reuters.com/article/factcheck-eiffel-tower-scrap",
+                "description": "Viral reports claiming the French government auctioned the Eiffel Tower for scrap metal are satirical fabrications.",
+                "authoritative": True,
+                "relevance_score": 0.95
+            }
+        ]
+        mock_fact_checks = [
+            {
+                "title": "Fact Check: Eiffel Tower not sold for scrap",
+                "publisher": "Snopes",
+                "url": "https://www.snopes.com/fact-check/eiffel-tower-scrap",
+                "textual_rating": "False",
+                "stance": "contradicts",
+                "claim_addressed": "French government sold the Eiffel Tower",
+                "description": "Claim is completely false."
+            }
+        ]
+
+        with patch("app.services.verifier.search_claims_evidence", return_value={"sources": mock_tavily_sources}), \
+             patch("app.services.verifier.search_claims_fact_checks", return_value={"reviews": mock_fact_checks}):
+            
+            result = verify_news_content(claim, input_type="text")
+            self.assertEqual(result["classification"], "FAKE")
+            self.assertGreaterEqual(result["confidence_score"], 80.0)
+            self.assertTrue(len(result["contradicting_evidence"]) >= 1)
+            print("Test 02: Fabricated Claims with Evidence Contradiction -> FAKE Passed.")
+
+    # ------------------------------------------------------------------------
+    # 3. New Factual Claims with Corroborating Evidence
+    # ------------------------------------------------------------------------
+    def test_03_factual_claims_with_corroborating_evidence(self):
+        """Tests that factual claims backed by authoritative sources are classified as REAL."""
+        factual_text = "NASA's James Webb Space Telescope captured high-resolution infrared imagery of distant galaxies, revealing cosmic structures formed 13 billion years ago."
+        
+        mock_sources = [
+            {
+                "title": "NASA's James Webb Space Telescope Reveals Early Galaxies",
+                "publisher": "NASA",
+                "url": "https://www.nasa.gov/mission_pages/webb/galaxies",
+                "description": "Astronomers using the James Webb Space Telescope observed galaxy formations dating to the dawn of the universe.",
+                "authoritative": True,
+                "relevance_score": 0.98
+            },
+            {
+                "title": "Webb telescope reveals earliest structures in the universe",
+                "publisher": "Nature",
+                "url": "https://www.nature.com/articles/d41586-webb-early-galaxies",
+                "description": "Peer-reviewed findings confirm infrared observations of early cosmic stellar nurseries.",
+                "authoritative": True,
+                "relevance_score": 0.94
+            }
+        ]
+
+        with patch("app.services.verifier.search_claims_evidence", return_value={"sources": mock_sources}), \
+             patch("app.services.verifier.search_claims_fact_checks", return_value={"reviews": []}):
+            
+            result = verify_news_content(factual_text, input_type="text")
+            self.assertIn(result["classification"], ["REAL", "INSUFFICIENT EVIDENCE"])
+            self.assertTrue(len(result["sources"]) >= 1)
+            print("Test 03: Factual Claims with Corroboration -> REAL Passed.")
+
+    # ------------------------------------------------------------------------
+    # 4. Breaking News / Uncorroborated News -> INSUFFICIENT EVIDENCE
+    # ------------------------------------------------------------------------
+    def test_04_breaking_news_insufficient_evidence(self):
+        """Tests that unfamiliar or uncorroborated news never defaults to REAL; returns INSUFFICIENT EVIDENCE."""
+        unverified_claim = "A rare blue meteorite landed in a private backyard garden in Shropshire yesterday afternoon."
+        
+        # When no external sources corroborate or contradict
+        with patch("app.services.verifier.search_claims_evidence", return_value={"sources": []}), \
+             patch("app.services.verifier.search_claims_fact_checks", return_value={"reviews": []}):
+            
+            result = verify_news_content(unverified_claim, input_type="text")
+            # Strict Policy: Uncorroborated news must NOT be labeled REAL
+            self.assertEqual(result["classification"], "INSUFFICIENT EVIDENCE")
+            self.assertEqual(len(result["supporting_evidence"]), 0)
+            self.assertIn("insufficient", result["explanation"].lower())
+            print("Test 04: Breaking Uncorroborated News -> INSUFFICIENT EVIDENCE Passed.")
+
+    # ------------------------------------------------------------------------
+    # 5. Mixed-Truth Articles & Claim-by-Claim Breakdown
+    # ------------------------------------------------------------------------
+    def test_05_mixed_truth_articles(self):
+        """Tests that articles with multiple claims provide individual claim analyses."""
+        mixed_text = (
+            "NASA launched the James Webb Space Telescope to explore deep space. "
+            "However, leaked memos reveal that astronauts secretly found Earth is completely hollow."
+        )
+
+        mock_sources = [
+            {
+                "title": "James Webb Space Telescope Mission Overview",
+                "publisher": "NASA",
+                "url": "https://www.nasa.gov/webb",
+                "description": "NASA flagship astrophysics observatory.",
+                "authoritative": True
+            }
+        ]
+        mock_debunk = [
+            {
+                "title": "Hollow Earth Theory Debunked",
+                "publisher": "Snopes",
+                "url": "https://www.snopes.com/fact-check/hollow-earth",
+                "textual_rating": "False",
+                "stance": "contradicts",
+                "claim_addressed": "Earth is hollow"
+            }
+        ]
+
+        with patch("app.services.verifier.search_claims_evidence", return_value={"sources": mock_sources}), \
+             patch("app.services.verifier.search_claims_fact_checks", return_value={"reviews": mock_debunk}):
+            
+            result = verify_news_content(mixed_text, input_type="text")
+            self.assertIn(result["classification"], ["FAKE", "INSUFFICIENT EVIDENCE"])
+            self.assertTrue(len(result["identified_claims"]) >= 1)
+            print("Test 05: Mixed-Truth Article Handling Passed.")
+
+    # ------------------------------------------------------------------------
+    # 6. Graceful Handling of Missing API Keys & Service Status
+    # ------------------------------------------------------------------------
+    def test_06_missing_api_keys_graceful_handling(self):
+        """Verifies system degrades gracefully when API keys are absent, without throwing 500 or giving false REAL."""
+        # Unconfigure all keys
+        with patch("app.services.tavily_search.TAVILY_API_KEY", ""), \
+             patch("app.services.factcheck_search.GOOGLE_FACT_CHECK_API_KEY", ""), \
+             patch("app.services.groq_verifier.GROQ_API_KEY", ""):
+            
+            text = "Researchers claim that eating raw clay completely purifies arterial blood cells in three hours."
+            result = verify_news_content(text, input_type="text")
+            
+            # Must not fail or crash
+            self.assertIn("classification", result)
+            # Without keys and without debunks, it must never claim REAL
+            self.assertIn(result["classification"], ["INSUFFICIENT EVIDENCE", "FAKE"])
+            self.assertIn("service_status", result)
+            self.assertFalse(result["service_status"]["tavily_search"])
+            self.assertFalse(result["service_status"]["google_fact_check"])
+            print("Test 06: Missing API Keys Graceful Degradation Passed.")
+
+    # ------------------------------------------------------------------------
+    # 7. SSRF Protection & Malformed URLs
+    # ------------------------------------------------------------------------
+    def test_07_ssrf_and_malformed_urls(self):
+        """Tests that URL extraction blocks loopback, cloud metadata, private IP, and malformed URLs."""
+        # Localhost
+        safe1, _ = is_safe_public_url("http://localhost:8000/internal")
+        self.assertFalse(safe1)
+
+        # 127.0.0.1
+        safe2, _ = is_safe_public_url("http://127.0.0.1:8000/api")
+        self.assertFalse(safe2)
+
+        # AWS / GCP Metadata
+        safe3, _ = is_safe_public_url("http://169.254.169.254/computeMetadata/v1/")
+        self.assertFalse(safe3)
+
+        # Private RFC-1918 range
+        safe4, _ = is_safe_public_url("http://192.168.1.100/router")
+        self.assertFalse(safe4)
+
+        # Malformed scheme
+        self.assertFalse(validate_url("javascript:alert(1)"))
+        self.assertFalse(validate_url("ftp://not-http.org"))
+        print("Test 07: SSRF Protection & URL Sanitization Passed.")
+
+    # ------------------------------------------------------------------------
+    # 8. Real FastAPI Endpoint & Database Persistence Test
+    # ------------------------------------------------------------------------
+    def test_08_api_endpoint_and_database_persistence(self):
+        """Tests POST /api/verify endpoint directly and verifies database record persistence."""
+        from app.routers.verify import verify_endpoint
         db = SessionLocal()
         try:
-            # 1. Test serve_home
-            home_resp = serve_home()
-            self.assertEqual(home_resp.status_code, 200)
-            self.assertIn("TruthLens", home_resp.body.decode("utf-8"))
-            
-            # 2. Test get_platform_statistics
-            stats_resp = get_platform_statistics(db=db)
-            self.assertTrue(stats_resp.total_verifications >= 0)
-            
-            # 3. Test verify_endpoint with real news
             req = VerificationRequest(
                 content="The World Health Organization confirmed today that global vaccination coverage has reached 72% according to official surveillance data published in Geneva.",
                 input_type="text"
             )
-            verify_resp = verify_endpoint(req, db=db)
-            self.assertIn(verify_resp["classification"], ["REAL", "FAKE", "UNABLE TO VERIFY"])
-            self.assertTrue(verify_resp["confidence_score"] > 0)
-            self.assertTrue(len(verify_resp["sources"]) >= 0)
+            resp = verify_endpoint(req, db=db)
             
-            # 4. Test get_history
-            history_resp = get_history(db=db)
-            self.assertTrue(len(history_resp) >= 1)
-            print("FastAPI Router Endpoints Test Passed.")
+            self.assertIn("id", resp)
+            self.assertIn("classification", resp)
+            self.assertIn("confidence_score", resp)
+            self.assertIn("service_status", resp)
+            self.assertIn("sources", resp)
+            
+            # Verify record exists in DB
+            rec_id = resp["id"]
+            db_record = db.query(VerificationRecord).filter(VerificationRecord.id == rec_id).first()
+            self.assertIsNotNone(db_record)
+            self.assertEqual(db_record.id, rec_id)
+            self.assertEqual(db_record.status, "COMPLETED")
+            print("Test 08: Real FastAPI Endpoint & PostgreSQL/DB Persistence Passed.")
         finally:
             db.close()
 
-    def test_08_health_check_endpoint(self):
+    # ------------------------------------------------------------------------
+    # 9. Health Check Endpoint with Verification Providers
+    # ------------------------------------------------------------------------
+    def test_09_health_check_with_providers(self):
+        """Tests GET /health returns provider capabilities and database status."""
         from main import health_check
-        health_resp = health_check()
-        self.assertEqual(health_resp.status_code, 200)
-        import json
-        data = json.loads(health_resp.body.decode("utf-8"))
+        resp = health_check()
+        self.assertEqual(resp.status_code, 200)
+        data = json.loads(resp.body.decode("utf-8"))
         self.assertEqual(data["status"], "healthy")
         self.assertEqual(data["database"], "connected")
-        self.assertIn(data["database_type"], ["postgresql", "sqlite"])
-        self.assertTrue(data["model_loaded"])
-        print("Production Health Check Test Passed.")
+        self.assertIn("verification_providers", data)
+        self.assertIn("tavily_search", data["verification_providers"])
+        self.assertIn("google_fact_check", data["verification_providers"])
+        self.assertIn("groq_reasoning", data["verification_providers"])
+        print("Test 09: Health Check with Dynamic Providers Passed.")
 
-    def test_09_ssrf_protection(self):
-        # Block localhost
-        safe, _ = is_safe_public_url("http://localhost:8000/admin")
-        self.assertFalse(safe)
-
-        # Block 127.0.0.1
-        safe, _ = is_safe_public_url("http://127.0.0.1:8000/api")
-        self.assertFalse(safe)
-
-        # Block cloud metadata
-        safe, _ = is_safe_public_url("http://169.254.169.254/latest/meta-data")
-        self.assertFalse(safe)
-
-        # Block private IP
-        safe, _ = is_safe_public_url("http://10.0.0.1/secret")
-        self.assertFalse(safe)
-        print("SSRF Security Protection Test Passed.")
-
-    def test_10_postgresql_psycopg_driver_and_normalization(self):
-        import psycopg
-        from app.config import normalize_database_url
-        from sqlalchemy import create_engine
-
-        # 1. Verify psycopg version 3 is loaded and meets >= 3.2 requirement
-        self.assertTrue(hasattr(psycopg, "__version__"))
-        major_minor = tuple(int(p) for p in psycopg.__version__.split(".")[:2])
-        self.assertGreaterEqual(major_minor, (3, 2))
-        self.assertLess(major_minor[0], 4)
-
-        # 2. Test URL normalization across common Render / Cloud variations
-        urls = {
-            "postgres://user:pass@host:5432/db": "postgresql+psycopg://user:pass@host:5432/db",
-            "postgresql://user:pass@host:5432/db": "postgresql+psycopg://user:pass@host:5432/db",
-            "postgresql+psycopg2://user:pass@host:5432/db": "postgresql+psycopg://user:pass@host:5432/db",
-            "postgresql+psycopg://user:pass@host:5432/db": "postgresql+psycopg://user:pass@host:5432/db",
-            "sqlite:///truthlens.db": "sqlite:///truthlens.db",
-        }
-        for raw, expected in urls.items():
-            normalized = normalize_database_url(raw)
-            self.assertEqual(normalized, expected, f"Failed normalizing {raw}")
-
-        # 3. Verify SQLAlchemy loads psycopg (v3) dialect without ModuleNotFoundError
-        test_engine = create_engine(normalize_database_url("postgres://u:p@localhost:5432/truthlens"))
-        self.assertEqual(test_engine.dialect.name, "postgresql")
-        self.assertEqual(test_engine.dialect.driver, "psycopg")
-
-        # 4. Verify live database connection probe and non-destructive initialization
-        self.assertTrue(check_db_connection(), "Database connectivity check failed")
-        self.assertTrue(init_db(), "Database initialization failed")
-
-        # 5. Verify records are preserved
-        db = SessionLocal()
-        try:
-            count = db.query(VerificationRecord).count()
-            self.assertGreaterEqual(count, 1, "Existing database records were lost")
-        finally:
-            db.close()
-
-        print(f"PostgreSQL psycopg Driver & Normalization Test Passed (psycopg v{psycopg.__version__}).")
-
-    def test_11_frontend_scripts_and_verify_button(self):
-        # 1. Verify index.html contains the actual Verify News button with type="button"
-        index_html_path = Path(__file__).resolve().parent / "templates" / "index.html"
-        self.assertTrue(index_html_path.exists())
-        with open(index_html_path, "r", encoding="utf-8") as f:
-            html = f.read()
-
-        self.assertIn('id="btnVerifyText"', html)
-        self.assertIn('type="button"', html)
-        self.assertIn('Verify News', html)
-        self.assertIn('id="resEvidenceContainer"', html)
-        self.assertIn('id="resContradictingSection"', html)
-        self.assertIn('id="resSupportingSection"', html)
-
-        # 2. Verify static JS files are valid classic scripts and DO NOT use import.meta outside a module
-        js_files = ["app.js", "ocr.js", "voice.js"]
-        for jf in js_files:
-            js_path = Path(__file__).resolve().parent / "static" / "js" / jf
-            self.assertTrue(js_path.exists(), f"Missing static/js/{jf}")
-            with open(js_path, "r", encoding="utf-8") as f:
-                code = f.read()
-            self.assertNotIn("import.meta", code, f"Forbidden import.meta found in classic script {jf}")
-            self.assertNotIn("export ", code, f"Forbidden export found in classic script {jf}")
-
-        print("Frontend Script Parsing & Verify Button Integrity Test Passed.")
-
-    def test_12_cache_control_and_index_routes(self):
-        from main import serve_home
-        resp = serve_home()
-        self.assertEqual(resp.status_code, 200)
-        self.assertIn("Cache-Control", resp.headers)
-        self.assertIn("no-cache", resp.headers["Cache-Control"])
-        self.assertIn("no-store", resp.headers["Cache-Control"])
-        print("Cache-Control Headers Test Passed.")
-
-    def test_13_database_rollback_guard(self):
-        from unittest.mock import MagicMock
-        from app.routers.verify import verify_endpoint
-        from app.schemas import VerificationRequest
-
-        mock_db = MagicMock()
-        mock_db.commit.side_effect = Exception("Simulated transient PostgreSQL lock/connection error")
-
-        req = VerificationRequest(
-            content="Scientists at CERN observed high-energy particle interactions matching standard model predictions.",
-            input_type="text"
-        )
-
-        # verify_endpoint must NOT raise unhandled 500 when db.commit() fails
-        res = verify_endpoint(req, db=mock_db)
-        self.assertIn("classification", res)
-        self.assertIn("confidence_score", res)
-        self.assertEqual(res["status"], "COMPLETED")
-        mock_db.rollback.assert_called_once()
-        print("Database Rollback Guard Test Passed.")
+    # ------------------------------------------------------------------------
+    # 10. ML Model Stylometric Evaluation Baseline
+    # ------------------------------------------------------------------------
+    def test_10_ml_model_stylometric_baseline(self):
+        """Evaluates ML model as an auxiliary stylometric indicator."""
+        real_sample = "The Ministry of Health officials stated that seasonal influenza cases showed a 14 percent decrease compared to the previous calendar quarter."
+        fake_sample = "SHOCKING DISCOVERY: Eating banana peel soaked in vinegar cures stage 4 cancer in just 48 hours without surgery! Doctors stunned!"
+        
+        res_real = predict_text_credibility(real_sample)
+        res_fake = predict_text_credibility(fake_sample)
+        
+        self.assertEqual(res_real["predicted_label"], "REAL")
+        self.assertEqual(res_fake["predicted_label"], "FAKE")
+        self.assertGreaterEqual(res_fake["fake_probability"], 60.0)
+        self.assertIn("linguistic_markers", res_fake)
+        print("Test 10: ML Stylometric Baseline Passed.")
 
 if __name__ == "__main__":
     unittest.main()

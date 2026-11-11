@@ -1,8 +1,13 @@
 import os
 from pathlib import Path
+from dotenv import load_dotenv
 
 # Base directories
 BASE_DIR = Path(__file__).resolve().parent.parent
+
+# Load local environment variables if .env file exists
+load_dotenv(BASE_DIR / ".env")
+
 STATIC_DIR = BASE_DIR / "static"
 TEMPLATES_DIR = BASE_DIR / "templates"
 MODEL_DIR = BASE_DIR / "app" / "ml"
@@ -64,11 +69,26 @@ ALLOWED_IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp"}
 MIN_CLAIM_LENGTH = 10
 MAX_TEXT_LENGTH = 20000
 
-# Search & Verification Providers (Configurable via Environment Variables)
-SEARCH_API_KEY = os.getenv("SEARCH_API_KEY", "")
-CUSTOM_SEARCH_ENGINE_ID = os.getenv("CUSTOM_SEARCH_ENGINE_ID", "")
-FACT_CHECK_API_KEY = os.getenv("FACT_CHECK_API_KEY", "")
-GROQ_API_KEY = os.getenv("GROQ_API_KEY", "")
+# Dynamic Verification Providers (Configurable via Environment Variables)
+TAVILY_API_KEY = os.getenv("TAVILY_API_KEY", "").strip()
+GOOGLE_FACT_CHECK_API_KEY = os.getenv("GOOGLE_FACT_CHECK_API_KEY", os.getenv("FACT_CHECK_API_KEY", "")).strip()
+GROQ_API_KEY = os.getenv("GROQ_API_KEY", "").strip()
+GROQ_MODEL = os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile").strip()
+
+# Legacy search keys (kept for backward compatibility)
+SEARCH_API_KEY = os.getenv("SEARCH_API_KEY", "").strip()
+CUSTOM_SEARCH_ENGINE_ID = os.getenv("CUSTOM_SEARCH_ENGINE_ID", "").strip()
+FACT_CHECK_API_KEY = GOOGLE_FACT_CHECK_API_KEY
+
+def get_provider_capabilities() -> dict:
+    """Returns availability status of dynamic verification and AI reasoning providers."""
+    return {
+        "tavily_search": bool(TAVILY_API_KEY),
+        "google_fact_check": bool(GOOGLE_FACT_CHECK_API_KEY),
+        "groq_reasoning": bool(GROQ_API_KEY),
+        "groq_model": GROQ_MODEL if GROQ_API_KEY else None,
+        "ml_classifier": MODEL_PATH.exists()
+    }
 
 # Request User-Agent for ethical news scraping
 USER_AGENT = "TruthLens-FactCheck-Bot/2.0 (+https://truthlens.ai/verification-bot; contact@truthlens.ai)"

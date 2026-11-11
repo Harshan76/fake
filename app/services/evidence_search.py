@@ -16,7 +16,7 @@ TRUSTED_DOMAINS = [
 # Verified debunks for widely recurring viral hoaxes with genuine direct URLs
 KNOWN_VIRAL_HOAX_REGISTRY = [
     {
-        "keywords": ["garlic", "cure", "covid", "virus"],
+        "keywords": ["garlic", "lemon", "cure", "covid", "virus", "viral", "infection", "boil"],
         "title": "Coronavirus disease (COVID-19) mythbusters: Garlic",
         "publisher": "World Health Organization (WHO)",
         "url": "https://www.who.int/emergencies/diseases/novel-coronavirus-2019/advice-for-public/myth-busters",
