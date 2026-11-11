@@ -114,7 +114,8 @@ def load_dataset(dataset_path: Path = None) -> Tuple[List[str], List[int], str]:
 
             labels = []
             for t in raw_targets:
-                if str(t).upper() in ["FAKE", "1", "TRUE"]:
+                val = str(t).strip().upper()
+                if val in ["FAKE", "1", "FALSE"]:
                     labels.append(1)
                 else:
                     labels.append(0)

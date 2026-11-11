@@ -70,18 +70,22 @@ def verify_news_content(text: str, input_type: str = "text", original_url: str =
             "status": "COMPLETED"
         }
 
+    logger.info(f"Verification pipeline started for input length {len(clean_text)} (input_type={input_type}).")
+
     # Step 1: Identify Key Factual Claims (Groq with fallback to NLP)
     identified_claims = extract_claims_with_groq(clean_text)
     if not identified_claims:
         identified_claims = extract_key_claims(clean_text)
     if not identified_claims and clean_text:
         identified_claims = [clean_text[:160] + ("..." if len(clean_text) > 160 else "")]
+    logger.info(f"Extracted {len(identified_claims)} verifiable claims: {[c[:60] for c in identified_claims]}")
 
     # Step 2: Query Google Fact Check Tools API
     fact_check_data = search_claims_fact_checks(identified_claims)
     fact_check_reviews = fact_check_data.get("reviews", [])
     fact_check_contradicting = fact_check_data.get("contradicting", [])
     fact_check_supporting = fact_check_data.get("supporting", [])
+    logger.info(f"Fact Check API returned {len(fact_check_reviews)} reviews ({len(fact_check_contradicting)} contradicting, {len(fact_check_supporting)} supporting).")
 
     # Step 3: Query Tavily Search API for Live Web Evidence & Attributions
     tavily_data = search_claims_evidence(identified_claims, full_text=clean_text)
@@ -89,6 +93,7 @@ def verify_news_content(text: str, input_type: str = "text", original_url: str =
     tavily_contradicting = tavily_data.get("contradicting", [])
     tavily_supporting = tavily_data.get("supporting", [])
     attribution_findings = tavily_data.get("attribution_findings", [])
+    logger.info(f"Tavily Search returned {len(tavily_sources)} sources ({len(tavily_contradicting)} contradicting, {len(tavily_supporting)} supporting, {len(attribution_findings)} attribution findings).")
 
     # Step 4: Check Known Viral Hoax Registry (Direct accredited fact-check URLs)
     hoax_matches = match_known_viral_hoaxes(clean_text)
@@ -109,6 +114,7 @@ def verify_news_content(text: str, input_type: str = "text", original_url: str =
     ml_result = predict_text_credibility(clean_text)
     ml_label = ml_result.get("predicted_label", "UNABLE TO VERIFY")
     ml_conf = ml_result.get("model_confidence", 50.0)
+    logger.info(f"ML Stylometric Indicator (auxiliary only): label={ml_label}, real_prob={ml_result.get('real_probability')}%, fake_prob={ml_result.get('fake_probability')}%.")
 
     # Step 6: Consolidate External Evidence Sources (Deduplicated)
     all_sources: List[Dict[str, Any]] = []
@@ -169,6 +175,7 @@ def verify_news_content(text: str, input_type: str = "text", original_url: str =
     supporting_evidence = synthesis.get("supporting_evidence") or []
     contradicting_evidence = synthesis.get("contradicting_evidence") or []
     limitations = synthesis.get("limitations") or []
+    logger.info(f"Evidence Synthesis ({synthesis.get('reasoning_engine', 'engine')}): raw_verdict={verdict}, raw_conf={confidence_score}.")
 
     # Merge verified registry debunks into contradicting_evidence
     for r in registry_contradicting:
@@ -184,7 +191,7 @@ def verify_news_content(text: str, input_type: str = "text", original_url: str =
         if not any(tc.get("detail") == c.get("detail") for c in contradicting_evidence):
             contradicting_evidence.append(tc)
 
-    # Merge supporting items
+    # Merge supporting items (only if genuine corroboration exists)
     for s_item in registry_supporting:
         if not any(s_item["claim_addressed"] == s.get("claim_addressed") for s in supporting_evidence):
             supporting_evidence.append(s_item)
@@ -202,17 +209,44 @@ def verify_news_content(text: str, input_type: str = "text", original_url: str =
     elif all_sources:
         evidence_score = 55.0
 
-    # Step 9: Final Quality & Strict Policy Assurance
-    # Policy 1: Never classify as REAL without supporting evidence
-    if verdict == "REAL" and len(supporting_evidence) == 0 and len(all_sources) < 2:
+    # Step 9: Final Quality & Strict Evidence-Based Policy Assurance
+    # Policy 1: REAL requires sufficient reliable supporting evidence directly confirming the claim.
+    # Under NO circumstances can a claim be declared REAL without at least 2 credible supporting evidence items
+    # (or 1 verified primary institutional record) that directly corroborate the specific material assertions.
+    if verdict == "REAL":
+        if len(supporting_evidence) < 2:
+            verdict = "INSUFFICIENT EVIDENCE"
+            confidence_score = 50.0
+            explanation = (
+                "While the submitted content may be written in a formal or journalistic tone, TruthLens could not find "
+                "sufficient independent primary source corroboration directly confirming these material claims on the live web. "
+                "Under strict verification rules, uncorroborated assertions cannot be declared REAL without evidence."
+            )
+
+    # Policy 2: Credible contradictory evidence yields FAKE unless evidence is genuinely conflicting
+    is_conflicting = bool(
+        contradicting_evidence and supporting_evidence and
+        len(supporting_evidence) >= 2 and len(contradicting_evidence) >= 1
+    )
+
+    if is_conflicting:
         verdict = "INSUFFICIENT EVIDENCE"
         confidence_score = 50.0
         explanation = (
-            "While the text exhibits a journalistic style, TruthLens could not find sufficient primary source corroboration "
-            "on the live web. Under strict verification rules, uncorroborated assertions cannot be declared REAL without evidence."
+            "External sources provide conflicting accounts regarding these claims. While some authoritative sources corroborate aspects of the report, "
+            "independent investigations or fact checks raise substantial contradictions. Under strict verification standards, "
+            "the claim is classified as INSUFFICIENT EVIDENCE pending decisive consensus."
+        )
+    elif contradicting_evidence and verdict != "FAKE":
+        verdict = "FAKE"
+        confidence_score = max(confidence_score, 88.0)
+        source_name = contradicting_evidence[0].get("source", "Accredited Fact Checker")
+        explanation = (
+            f"Credible external evidence directly contradicts the material claims. "
+            f"Fact-checking records from {source_name} confirm the assertions are fabricated, disproven, or misleading."
         )
 
-    # Policy 2: Handle FAKE classifications and ensure evidence presence
+    # Policy 3: Never classify as FAKE without evidence or contradiction
     if verdict == "FAKE":
         if len(contradicting_evidence) == 0 and not hoax_matches:
             # Check if any claim analysis identified a contradiction
@@ -230,17 +264,18 @@ def verify_news_content(text: str, input_type: str = "text", original_url: str =
                 confidence_score = 50.0
                 explanation = (
                     "While the text exhibits questionable indicators or lacks corroboration, no credible external evidence "
-                    "directly contradicts the material claims. Classified as INSUFFICIENT EVIDENCE rather than assuming falsehood."
+                    "directly contradicts the material claims. Classified as INSUFFICIENT EVIDENCE rather than assuming falsehood without factual refutation."
                 )
 
-    # Policy 3: Attribution check without false equivalence
+    # Policy 4: Attribution check without false equivalence
     if attribution_findings and verdict == "INSUFFICIENT EVIDENCE":
         limitations.append(
             "Attributed organisation investigated: Absence from indexed search records alone does not establish falsehood without direct refutation."
         )
 
-    # Policy 4: Bound confidence between 45.0 and 94.0 (Never claim 100%)
+    # Policy 5: Bound confidence between 45.0 and 94.0 (Never claim 100%)
     final_confidence = min(max(confidence_score, 45.0), 94.0)
+    logger.info(f"Final Policy Enforcement: classification={verdict}, final_confidence={final_confidence}%, supporting={len(supporting_evidence)}, contradicting={len(contradicting_evidence)}.")
 
     # Compile explicit service status
     service_status = {

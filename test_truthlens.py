@@ -88,7 +88,7 @@ class TruthLensDynamicVerificationTests(unittest.TestCase):
     # 3. New Factual Claims with Corroborating Evidence
     # ------------------------------------------------------------------------
     def test_03_factual_claims_with_corroborating_evidence(self):
-        """Tests that factual claims backed by authoritative sources are classified as REAL."""
+        """Tests that factual claims backed by authoritative sources directly confirming the claims are classified as REAL."""
         factual_text = "NASA's James Webb Space Telescope captured high-resolution infrared imagery of distant galaxies, revealing cosmic structures formed 13 billion years ago."
         
         mock_sources = [
@@ -96,7 +96,7 @@ class TruthLensDynamicVerificationTests(unittest.TestCase):
                 "title": "NASA's James Webb Space Telescope Reveals Early Galaxies",
                 "publisher": "NASA",
                 "url": "https://www.nasa.gov/mission_pages/webb/galaxies",
-                "description": "Astronomers using the James Webb Space Telescope observed galaxy formations dating to the dawn of the universe.",
+                "description": "Astronomers using the James Webb Space Telescope observed early galaxy structures and infrared imagery formed 13 billion years ago.",
                 "authoritative": True,
                 "relevance_score": 0.98,
                 "stance": "supports"
@@ -105,7 +105,7 @@ class TruthLensDynamicVerificationTests(unittest.TestCase):
                 "title": "Webb telescope reveals earliest structures in the universe",
                 "publisher": "Nature",
                 "url": "https://www.nature.com/articles/d41586-webb-early-galaxies",
-                "description": "Peer-reviewed findings confirm infrared observations of early cosmic stellar nurseries.",
+                "description": "Peer-reviewed findings confirm James Webb infrared observations of early cosmic stellar galaxies 13 billion years ago.",
                 "authoritative": True,
                 "relevance_score": 0.94,
                 "stance": "supports"
@@ -122,9 +122,131 @@ class TruthLensDynamicVerificationTests(unittest.TestCase):
             print("Test 03: Factual Claims with Corroboration -> REAL Passed.")
 
     # ------------------------------------------------------------------------
-    # 4. Fabricated Organisations & Announcements (With Explicit Refutation)
+    # 4. Moon Disappearance Fabricated Claim (General Search Results -> INSUFFICIENT EVIDENCE)
     # ------------------------------------------------------------------------
-    def test_04_fabricated_organisation_with_debunk(self):
+    def test_04_moon_disappearance_unsupported_returns_insufficient_evidence(self):
+        """
+        Regression Test: Fabricated article asserting the Moon will disappear for 48 hours in December 2026.
+        When search returns general articles about the Moon / Artemis / regular eclipses (which do not
+        confirm the disappearance), the system must NEVER return REAL. It must return INSUFFICIENT EVIDENCE.
+        """
+        moon_article = (
+            "NASA scientists announced that the Moon will completely disappear from the night sky for 48 hours "
+            "in December 2026 due to an unprecedented lunar orbital eclipse."
+        )
+
+        # General authoritative search results mentioning the Moon/2026, but NOT corroborating the disappearance
+        mock_general_sources = [
+            {
+                "title": "NASA - Artemis Moon Missions 2026",
+                "publisher": "NASA",
+                "url": "https://www.nasa.gov/artemis-2026",
+                "description": "NASA details lunar exploration plans for 2026 under the Artemis program.",
+                "authoritative": True,
+                "stance": "neutral"
+            },
+            {
+                "title": "BBC News - Lunar Eclipses to watch in 2026",
+                "publisher": "BBC News",
+                "url": "https://www.bbc.com/news/science-environment",
+                "description": "Astronomers track eclipses and celestial events for the coming years.",
+                "authoritative": True,
+                "stance": "neutral"
+            }
+        ]
+
+        with patch("app.services.verifier.search_claims_evidence", return_value={"sources": mock_general_sources, "contradicting": [], "supporting": []}), \
+             patch("app.services.verifier.search_claims_fact_checks", return_value={"reviews": [], "contradicting": [], "supporting": []}):
+            
+            result = verify_news_content(moon_article, input_type="text")
+            # Must strictly NOT be REAL
+            self.assertNotEqual(result["classification"], "REAL", "Fabricated Moon claim must never be classified as REAL!")
+            self.assertEqual(result["classification"], "INSUFFICIENT EVIDENCE")
+            self.assertEqual(len(result["supporting_evidence"]), 0)
+            print("Test 04: Moon Disappearance (General/Unsupportive Search) -> INSUFFICIENT EVIDENCE Passed.")
+
+    # ------------------------------------------------------------------------
+    # 5. Moon Disappearance Fabricated Claim (Debunked -> FAKE)
+    # ------------------------------------------------------------------------
+    def test_05_moon_disappearance_debunked_returns_fake(self):
+        """
+        Regression Test: When search or fact-checking retrieves an explicit debunk refuting the Moon disappearance,
+        the system must classify it as FAKE with direct citation of the debunk.
+        """
+        moon_article = (
+            "NASA scientists announced that the Moon will completely disappear from the night sky for 48 hours "
+            "in December 2026 due to an unprecedented lunar orbital eclipse."
+        )
+
+        mock_debunk = [
+            {
+                "title": "Fact Check: The Moon will NOT disappear for 48 hours in December 2026",
+                "publisher": "Reuters Fact Check",
+                "url": "https://www.reuters.com/factcheck-moon-disappear-2026",
+                "description": "Viral social media claims asserting NASA warned of a 48-hour lunar blackout are scientifically impossible and fabricated.",
+                "authoritative": True,
+                "stance": "contradicts",
+                "reliability": "Very High"
+            }
+        ]
+
+        with patch("app.services.verifier.search_claims_evidence", return_value={"sources": mock_debunk, "contradicting": mock_debunk, "supporting": []}), \
+             patch("app.services.verifier.search_claims_fact_checks", return_value={"reviews": [], "contradicting": [], "supporting": []}):
+            
+            result = verify_news_content(moon_article, input_type="text")
+            self.assertEqual(result["classification"], "FAKE")
+            self.assertGreaterEqual(result["confidence_score"], 80.0)
+            self.assertTrue(len(result["contradicting_evidence"]) >= 1)
+            print("Test 05: Moon Disappearance (Debunked) -> FAKE Passed.")
+
+    # ------------------------------------------------------------------------
+    # 6. ML Classifier Cannot Override Evidence-Based Verdict
+    # ------------------------------------------------------------------------
+    def test_06_ml_classifier_cannot_override_evidence(self):
+        """
+        Regression Test: The ML classifier must NEVER override an evidence-based verdict.
+        Even if the ML classifier predicts REAL with 99% probability, an uncorroborated claim
+        cannot become REAL, and a contradicted claim must remain FAKE.
+        """
+        formal_fabricated = (
+            "The National Aeronautics and Space Administration published annual surveillance recommendations in Geneva "
+            "detailing that the Moon will completely disappear for 48 hours in December 2026."
+        )
+
+        # Case A: ML says REAL (99%), but search has 0 supporting evidence -> MUST return INSUFFICIENT EVIDENCE
+        with patch("app.services.verifier.predict_text_credibility", return_value={
+            "predicted_label": "REAL", "fake_probability": 1.0, "real_probability": 99.0, "model_confidence": 99.0, "linguistic_markers": {}
+        }), patch("app.services.verifier.search_claims_evidence", return_value={"sources": [], "contradicting": [], "supporting": []}), \
+            patch("app.services.verifier.search_claims_fact_checks", return_value={"reviews": [], "contradicting": [], "supporting": []}):
+            
+            res_a = verify_news_content(formal_fabricated, input_type="text")
+            self.assertEqual(res_a["classification"], "INSUFFICIENT EVIDENCE")
+            self.assertEqual(len(res_a["supporting_evidence"]), 0)
+            self.assertEqual(res_a["ml_prediction"]["predicted_label"], "REAL")
+
+        # Case B: ML says REAL (99%), but search has debunk evidence -> MUST return FAKE
+        mock_debunk = [{
+            "source": "FactCheck.org",
+            "claim_addressed": "Moon disappearing",
+            "detail": "Claim is completely false and disproven.",
+            "url": "https://factcheck.org/moon-myth",
+            "stance": "contradicts",
+            "reliability": "High"
+        }]
+        with patch("app.services.verifier.predict_text_credibility", return_value={
+            "predicted_label": "REAL", "fake_probability": 1.0, "real_probability": 99.0, "model_confidence": 99.0, "linguistic_markers": {}
+        }), patch("app.services.verifier.search_claims_evidence", return_value={"sources": mock_debunk, "contradicting": mock_debunk, "supporting": []}), \
+            patch("app.services.verifier.search_claims_fact_checks", return_value={"reviews": [], "contradicting": [], "supporting": []}):
+            
+            res_b = verify_news_content(formal_fabricated, input_type="text")
+            self.assertEqual(res_b["classification"], "FAKE")
+            self.assertTrue(len(res_b["contradicting_evidence"]) >= 1)
+            print("Test 06: ML Classifier Cannot Override Evidence -> Passed.")
+
+    # ------------------------------------------------------------------------
+    # 7. Fabricated Organisations & Announcements (With Explicit Refutation)
+    # ------------------------------------------------------------------------
+    def test_07_fabricated_organisation_with_debunk(self):
         """Tests that fabricated announcements from fictional bodies with debunking evidence are classified as FAKE."""
         fabricated_text = (
             "The International Oceanic Preservation Bureau in Geneva announced today that all domestic cats "
@@ -151,12 +273,12 @@ class TruthLensDynamicVerificationTests(unittest.TestCase):
             self.assertGreaterEqual(result["confidence_score"], 80.0)
             self.assertTrue(len(result["contradicting_evidence"]) >= 1)
             self.assertIn("ap news", json.dumps(result["contradicting_evidence"]).lower())
-            print("Test 04: Fabricated Organisation (Debunked) -> FAKE Passed.")
+            print("Test 07: Fabricated Organisation (Debunked) -> FAKE Passed.")
 
     # ------------------------------------------------------------------------
-    # 5. Fabricated Organisations (Absence Alone Does Not Establish Falsehood)
+    # 8. Fabricated Organisations (Absence Alone Does Not Establish Falsehood)
     # ------------------------------------------------------------------------
-    def test_05_fictional_organisation_absence_alone_rule(self):
+    def test_08_fictional_organisation_absence_alone_rule(self):
         """Tests that absence of an organisation from search results alone does NOT automatically establish FAKE."""
         unverified_text = (
             "The Zurich Society for Alpine Horticulture discovered an undiscovered subspecies of lavender "
@@ -177,12 +299,12 @@ class TruthLensDynamicVerificationTests(unittest.TestCase):
             self.assertEqual(len(result["contradicting_evidence"]), 0)
             limitations_str = " ".join(result.get("limitations", [])).lower()
             self.assertTrue("absence" in limitations_str or "unindexed" in limitations_str or "insufficient" in limitations_str)
-            print("Test 05: Fictional Organisation Absence Rule -> INSUFFICIENT EVIDENCE Passed.")
+            print("Test 08: Fictional Organisation Absence Rule -> INSUFFICIENT EVIDENCE Passed.")
 
     # ------------------------------------------------------------------------
-    # 6. Unverifiable / Breaking News -> INSUFFICIENT EVIDENCE
+    # 9. Unverifiable / Breaking News -> INSUFFICIENT EVIDENCE
     # ------------------------------------------------------------------------
-    def test_06_unverifiable_claims(self):
+    def test_09_unverifiable_claims(self):
         """Tests that unfamiliar or uncorroborated news never defaults to REAL; returns INSUFFICIENT EVIDENCE."""
         unverified_claim = "A rare blue meteorite landed in a private backyard garden in Shropshire yesterday afternoon."
         
@@ -193,12 +315,12 @@ class TruthLensDynamicVerificationTests(unittest.TestCase):
             self.assertEqual(result["classification"], "INSUFFICIENT EVIDENCE")
             self.assertEqual(len(result["supporting_evidence"]), 0)
             self.assertIn("insufficient", result["explanation"].lower())
-            print("Test 06: Unverifiable Claims -> INSUFFICIENT EVIDENCE Passed.")
+            print("Test 09: Unverifiable Claims -> INSUFFICIENT EVIDENCE Passed.")
 
     # ------------------------------------------------------------------------
-    # 7. Conflicting Evidence Handling
+    # 10. Conflicting Evidence Handling
     # ------------------------------------------------------------------------
-    def test_07_conflicting_evidence_handling(self):
+    def test_10_conflicting_evidence_handling(self):
         """Tests that when external sources offer conflicting reports, system returns INSUFFICIENT EVIDENCE."""
         conflicting_text = "Archaeologists announce the discovery of an intact Roman amphitheater under a city square."
 
@@ -242,12 +364,12 @@ class TruthLensDynamicVerificationTests(unittest.TestCase):
             result = verify_news_content(conflicting_text, input_type="text")
             self.assertEqual(result["classification"], "INSUFFICIENT EVIDENCE")
             self.assertIn("conflict", result["explanation"].lower())
-            print("Test 07: Conflicting Evidence Handling -> INSUFFICIENT EVIDENCE Passed.")
+            print("Test 10: Conflicting Evidence Handling -> INSUFFICIENT EVIDENCE Passed.")
 
     # ------------------------------------------------------------------------
-    # 8. Mixed-Truth Articles & Claim-by-Claim Breakdown
+    # 11. Mixed-Truth Articles & Claim-by-Claim Breakdown
     # ------------------------------------------------------------------------
-    def test_08_mixed_truth_articles(self):
+    def test_11_mixed_truth_articles(self):
         """Tests that articles with multiple claims provide individual claim analyses."""
         mixed_text = (
             "NASA launched the James Webb Space Telescope to explore deep space. "
@@ -280,12 +402,12 @@ class TruthLensDynamicVerificationTests(unittest.TestCase):
             result = verify_news_content(mixed_text, input_type="text")
             self.assertIn(result["classification"], ["FAKE", "INSUFFICIENT EVIDENCE"])
             self.assertTrue(len(result["identified_claims"]) >= 1)
-            print("Test 08: Mixed-Truth Article Handling Passed.")
+            print("Test 11: Mixed-Truth Article Handling Passed.")
 
     # ------------------------------------------------------------------------
-    # 9. Graceful Handling of Missing API Keys & Service Status
+    # 12. Graceful Handling of Missing API Keys & Service Status
     # ------------------------------------------------------------------------
-    def test_09_missing_api_keys_graceful_handling(self):
+    def test_12_missing_api_keys_graceful_handling(self):
         """Verifies system degrades gracefully when API keys are absent, without throwing 500 or giving false REAL."""
         with patch("app.services.tavily_search.TAVILY_API_KEY", ""), \
              patch("app.services.factcheck_search.GOOGLE_FACT_CHECK_API_KEY", ""), \
@@ -299,12 +421,12 @@ class TruthLensDynamicVerificationTests(unittest.TestCase):
             self.assertIn("service_status", result)
             self.assertFalse(result["service_status"]["tavily_search"])
             self.assertFalse(result["service_status"]["google_fact_check"])
-            print("Test 09: Missing API Keys Graceful Degradation Passed.")
+            print("Test 12: Missing API Keys Graceful Degradation Passed.")
 
     # ------------------------------------------------------------------------
-    # 10. SSRF Protection & Malformed URLs
+    # 13. SSRF Protection & Malformed URLs
     # ------------------------------------------------------------------------
-    def test_10_ssrf_and_malformed_urls(self):
+    def test_13_ssrf_and_malformed_urls(self):
         """Tests that URL extraction blocks loopback, cloud metadata, private IP, and malformed URLs."""
         # Localhost
         safe1, _ = is_safe_public_url("http://localhost:8000/internal")
@@ -325,12 +447,12 @@ class TruthLensDynamicVerificationTests(unittest.TestCase):
         # Malformed scheme
         self.assertFalse(validate_url("javascript:alert(1)"))
         self.assertFalse(validate_url("ftp://not-http.org"))
-        print("Test 10: SSRF Protection & URL Sanitization Passed.")
+        print("Test 13: SSRF Protection & URL Sanitization Passed.")
 
     # ------------------------------------------------------------------------
-    # 11. Real FastAPI Endpoint & Database Persistence Test
+    # 14. Real FastAPI Endpoint & Database Persistence Test
     # ------------------------------------------------------------------------
-    def test_11_api_endpoint_and_database_persistence(self):
+    def test_14_api_endpoint_and_database_persistence(self):
         """Tests POST /api/verify endpoint directly and verifies database record persistence."""
         from app.routers.verify import verify_endpoint
         db = SessionLocal()
@@ -355,14 +477,14 @@ class TruthLensDynamicVerificationTests(unittest.TestCase):
             self.assertIsNotNone(db_record)
             self.assertEqual(db_record.id, rec_id)
             self.assertEqual(db_record.status, "COMPLETED")
-            print("Test 11: Real FastAPI Endpoint & PostgreSQL/DB Persistence Passed.")
+            print("Test 14: Real FastAPI Endpoint & PostgreSQL/DB Persistence Passed.")
         finally:
             db.close()
 
     # ------------------------------------------------------------------------
-    # 12. Health Check Endpoint with Verification Providers
+    # 15. Health Check Endpoint with Verification Providers
     # ------------------------------------------------------------------------
-    def test_12_health_check_with_providers(self):
+    def test_15_health_check_with_providers(self):
         """Tests GET /health returns provider capabilities and database status."""
         from main import health_check
         resp = health_check()
@@ -374,12 +496,12 @@ class TruthLensDynamicVerificationTests(unittest.TestCase):
         self.assertIn("tavily_search", data["verification_providers"])
         self.assertIn("google_fact_check", data["verification_providers"])
         self.assertIn("groq_reasoning", data["verification_providers"])
-        print("Test 12: Health Check with Dynamic Providers Passed.")
+        print("Test 15: Health Check with Dynamic Providers Passed.")
 
     # ------------------------------------------------------------------------
-    # 13. ML Model Stylometric Evaluation Baseline
+    # 16. ML Model Stylometric Evaluation Baseline
     # ------------------------------------------------------------------------
-    def test_13_ml_model_stylometric_baseline(self):
+    def test_16_ml_model_stylometric_baseline(self):
         """Evaluates ML model as an auxiliary stylometric indicator."""
         real_sample = "The Ministry of Health officials stated that seasonal influenza cases showed a 14 percent decrease compared to the previous calendar quarter."
         fake_sample = "SHOCKING DISCOVERY: Eating banana peel soaked in vinegar cures stage 4 cancer in just 48 hours without surgery! Doctors stunned!"
@@ -391,7 +513,7 @@ class TruthLensDynamicVerificationTests(unittest.TestCase):
         self.assertEqual(res_fake["predicted_label"], "FAKE")
         self.assertGreaterEqual(res_fake["fake_probability"], 60.0)
         self.assertIn("linguistic_markers", res_fake)
-        print("Test 13: ML Stylometric Baseline Passed.")
+        print("Test 16: ML Stylometric Baseline Passed.")
 
 if __name__ == "__main__":
     unittest.main()

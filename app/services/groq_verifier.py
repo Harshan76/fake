@@ -116,9 +116,11 @@ def synthesize_evidence_with_groq(
         "You are the TruthLens Forensic Evidence Engine. Your duty is to evaluate news authenticity "
         "based STRICTLY on provided external evidence.\n\n"
         "STRICT VERDICT RULES:\n"
-        "1. FAKE: Return FAKE when credible evidence directly contradicts a material factual claim or a reliable fact-check explicitly rates it false.\n"
-        "2. REAL: Return REAL when material claims have sufficient credible supporting evidence from authoritative sources, with no unresolved contradictions.\n"
+        "1. FAKE: Return FAKE ONLY when reliable evidence directly contradicts a material factual claim or a credible fact-check explicitly rates it false.\n"
+        "2. REAL: Return REAL ONLY when material claims have sufficient credible supporting evidence from authoritative sources that directly confirm the specific claim. Articles that merely discuss the same subject, celestial body, or agency (e.g. general NASA lunar exploration or regular seasonal eclipse calendars) DO NOT corroborate an extraordinary or specific claim (e.g. the Moon disappearing for 48 hours). Sources with 'neutral' stance or lacking direct confirmation of the specific event MUST NOT be treated as supporting evidence.\n"
         "3. INSUFFICIENT EVIDENCE: Return INSUFFICIENT EVIDENCE when neither conclusion is supported, or when evidence is absent, conflicting, or inconclusive.\n\n"
+        "ML STYLOMETRIC CLASSIFIER IS NOT FACTUAL EVIDENCE:\n"
+        "- The ML stylometric indicator is only a stylistic analysis of text tone and vocabulary. It has ZERO factual knowledge and MUST NEVER be used as proof that an event actually occurred.\n\n"
         "ATTRIBUTION & FICTIONAL ORGANISATIONS:\n"
         "- When a claim is attributed to an organization, authority, government agency, or committee:\n"
         "  * Investigate the attribution using authoritative sources.\n"
@@ -161,10 +163,10 @@ def synthesize_evidence_with_groq(
         "tavily_web_sources": web_evidence_summary,
         "attribution_findings": attribution_findings or [],
         "ml_stylometric_indicator": {
+            "note": "Text stylometric analysis only. Has ZERO factual authority.",
             "linguistic_label": ml_stylometrics.get("predicted_label"),
             "fake_probability": ml_stylometrics.get("fake_probability"),
-            "real_probability": ml_stylometrics.get("real_probability"),
-            "sensational_score": ml_stylometrics.get("linguistic_markers", {}).get("sensational_score", 0)
+            "real_probability": ml_stylometrics.get("real_probability")
         }
     }
 
@@ -255,7 +257,9 @@ def deterministic_evidence_synthesis(
 
     # 2. Inspect Tavily Web Sources
     for s in tavily_sources:
-        stance = s.get("stance") or inspect_source_stance(s)
+        stance = s.get("stance")
+        if not stance or stance == "neutral":
+            stance = inspect_source_stance(s, claim=primary_claim)
         item = {
             "source": s.get("publisher", "Web Source"),
             "claim_addressed": primary_claim,

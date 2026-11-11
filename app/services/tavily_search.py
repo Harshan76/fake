@@ -26,8 +26,20 @@ DEBUNK_INDICATORS = [
     r'\bnot true\b', r'\bno evidence\b', r'\bfabricat(?:ed|ion)\b', r'\bmisleading\b',
     r'\bdisproven\b', r'\bbogus\b', r'\bsatire\b', r'\bfictional\b', r'\bnever (?:said|occurred|happened)\b',
     r'\bdid not (?:announce|say|happen)\b', r'\bdoes not exist\b', r'\bno such (?:agency|department|organization|commission)\b',
-    r'\bpants on fire\b', r'\bmisattributed\b', r'\bunfounded\b', r'\bcounterfeit\b', r'\bphony\b'
+    r'\bpants on fire\b', r'\bmisattributed\b', r'\bunfounded\b', r'\bcounterfeit\b', r'\bphony\b',
+    r'\bimpossible\b', r'\buntrue\b', r'\bmyth\b', r'\bunverified\b'
 ]
+
+COMMON_STOPWORDS = {
+    'the', 'a', 'an', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for', 'with',
+    'of', 'by', 'from', 'as', 'is', 'are', 'was', 'were', 'be', 'been', 'being',
+    'have', 'has', 'had', 'do', 'does', 'did', 'this', 'that', 'these', 'those',
+    'it', 'its', 'they', 'them', 'their', 'we', 'us', 'our', 'you', 'your',
+    'today', 'yesterday', 'tomorrow', 'official', 'officially', 'report', 'reported',
+    'announced', 'stated', 'confirmed', 'revealed', 'news', 'according', 'scientists',
+    'experts', 'authorities', 'officials', 'team', 'study', 'new', 'recent', 'will',
+    'due', 'also', 'about', 'over', 'into', 'after', 'under', 'all', 'any'
+}
 
 def is_tavily_configured() -> bool:
     """Checks whether the Tavily Search API key is present."""
@@ -43,20 +55,45 @@ def extract_domain(url: str) -> str:
     except Exception:
         return ""
 
+def extract_substantive_tokens(text: str) -> set:
+    """Extracts clean substantive content tokens from text."""
+    clean = re.sub(r'[^a-zA-Z0-9\s]', ' ', text.lower())
+    words = clean.split()
+    return set(w for w in words if len(w) > 2 and w not in COMMON_STOPWORDS)
+
 def inspect_source_stance(source: Dict[str, Any], claim: str = "") -> str:
     """
     Evaluates whether a retrieved web source is directly contradicting/debunking a claim,
-    supporting it with authoritative corroboration, or neutral.
+    supporting it with authoritative corroboration of the specific material assertions, or neutral.
+    General background articles that merely share broad keywords (e.g. 'Moon' or 'NASA')
+    without confirming the claim's core event are classified as neutral.
     """
     text_to_check = f"{source.get('title', '')} {source.get('description', '')}".lower()
     
-    # Check for explicit debunk markers
+    # 1. Check for explicit debunk / refutation markers
     for pattern in DEBUNK_INDICATORS:
         if re.search(pattern, text_to_check):
             return "contradicts"
 
-    # If authoritative domain with no debunk signals, check for positive coverage
-    if source.get("authoritative", False):
+    # Only authoritative sources can corroborate
+    if not source.get("authoritative", False):
+        return "neutral"
+
+    if not claim or not claim.strip():
+        return "neutral"
+
+    # 2. Extract substantive content tokens from claim and source
+    claim_tokens = extract_substantive_tokens(claim)
+    if not claim_tokens:
+        return "neutral"
+
+    source_tokens = extract_substantive_tokens(text_to_check)
+    overlap = claim_tokens.intersection(source_tokens)
+
+    # To genuinely corroborate, the source must cover a substantial portion of the claim's core tokens
+    # (at least 3 distinctive tokens AND at least 35% overlap of the claim's key predicates)
+    overlap_ratio = len(overlap) / len(claim_tokens)
+    if len(overlap) >= 3 and overlap_ratio >= 0.35:
         return "supports"
 
     return "neutral"
@@ -254,15 +291,28 @@ def search_claims_evidence(claims: List[str], full_text: Optional[str] = None) -
                         "detail": f"Search for {attr_q} returned no official or authoritative institutional domains."
                     })
 
-    # Inspect all collected sources for stances
+    # Inspect all collected sources for stances against extracted claims
+    primary_claim = claims[0] if claims else (full_text or "")
     for s in collected_sources:
-        stance = inspect_source_stance(s)
+        stance = "neutral"
+        matched_claim = primary_claim
+
+        for c in claims[:3]:
+            st = inspect_source_stance(s, claim=c)
+            if st == "contradicts":
+                stance = "contradicts"
+                matched_claim = c
+                break
+            elif st == "supports" and stance != "contradicts":
+                stance = "supports"
+                matched_claim = c
+
         s["stance"] = stance
         
         if stance == "contradicts":
             contradicting.append({
                 "source": s.get("publisher", "Web Source"),
-                "claim_addressed": claims[0] if claims else "Primary Claim",
+                "claim_addressed": matched_claim,
                 "detail": f"{s.get('title')}: {s.get('description', '')[:250]}",
                 "url": s.get("url"),
                 "source_type": "web_fact_check",
@@ -271,7 +321,7 @@ def search_claims_evidence(claims: List[str], full_text: Optional[str] = None) -
         elif stance == "supports" and s.get("authoritative"):
             supporting.append({
                 "source": s.get("publisher", "Authoritative Source"),
-                "claim_addressed": claims[0] if claims else "Primary Claim",
+                "claim_addressed": matched_claim,
                 "detail": f"{s.get('title')}: {s.get('description', '')[:250]}",
                 "url": s.get("url"),
                 "source_type": "authoritative_news",
