@@ -23,7 +23,7 @@ HOST = os.getenv("HOST", "0.0.0.0")
 # Application Metadata
 APP_NAME = "TruthLens"
 APP_DESCRIPTION = "AI-Powered Fake News Detection & Multi-Modal Verification System"
-VERSION = "2.0.0"
+VERSION = "2.1.0"
 
 def normalize_database_url(url: str) -> str:
     """
