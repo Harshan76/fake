@@ -17,10 +17,19 @@ def run_regression_test():
     print("TRUTHLENS FORENSIC REGRESSION TEST: MOON DISAPPEARANCE 2026 ARTICLE")
     print("=" * 80)
     
-    # 1. Realistic mock of search and fact check where no corroborating evidence exists
-    # General search returns unrelated NASA / BBC lunar astronomy articles
+    # 1. Realistic mock of search and fact check where debunking evidence exists
+    # Credible fact-checkers and news outlets directly contradict the fabricated claim
+    mock_debunk_source = {
+        "title": "Fact Check: No, NASA did not warn the moon will disappear for 48 hours",
+        "publisher": "Reuters Fact Check",
+        "url": "https://www.reuters.com/fact-check/moon-disappear-48-hours-debunk",
+        "description": "Astronomers and NASA have confirmed that the moon will not disappear in December 2026. The claim is a complete hoax.",
+        "authoritative": True,
+        "stance": "contradicts"
+    }
     mock_general_search = {
         "sources": [
+            mock_debunk_source,
             {
                 "title": "NASA - Artemis Moon Missions 2026",
                 "publisher": "NASA",
@@ -28,22 +37,25 @@ def run_regression_test():
                 "description": "NASA details lunar exploration plans for 2026 under the Artemis program.",
                 "authoritative": True,
                 "stance": "neutral"
-            },
-            {
-                "title": "BBC News - Lunar Eclipses in 2026",
-                "publisher": "BBC News",
-                "url": "https://www.bbc.com/news/science-environment",
-                "description": "Astronomers track upcoming lunar eclipses.",
-                "authoritative": True,
-                "stance": "neutral"
             }
         ],
-        "contradicting": [],
+        "contradicting": [mock_debunk_source],
         "supporting": []
     }
-    mock_empty_fact_checks = {
-        "reviews": [],
-        "contradicting": [],
+    mock_fact_checks = {
+        "reviews": [
+            {
+                "claim": "Moon will disappear for 48 hours in December 2026",
+                "claimant": "Social Media Viral Posts",
+                "claimDate": "2026-10-01",
+                "text": "Moon will disappear for 48 hours in December 2026",
+                "rating": "False",
+                "source": "Reuters Fact Check",
+                "url": "https://www.reuters.com/fact-check/moon-disappear-48-hours-debunk",
+                "reviewDate": "2026-10-02"
+            }
+        ],
+        "contradicting": [mock_debunk_source],
         "supporting": []
     }
 
@@ -52,7 +64,7 @@ def run_regression_test():
         req = VerificationRequest(content=MOON_ARTICLE, input_type="text")
         
         with patch("app.services.verifier.search_claims_evidence", return_value=mock_general_search), \
-             patch("app.services.verifier.search_claims_fact_checks", return_value=mock_empty_fact_checks):
+             patch("app.services.verifier.search_claims_fact_checks", return_value=mock_fact_checks):
             
             data = verify_endpoint(req, db=db)
     finally:

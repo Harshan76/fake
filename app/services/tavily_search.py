@@ -4,20 +4,22 @@ import httpx
 from typing import List, Dict, Any, Optional
 from urllib.parse import urlparse
 from app.config import TAVILY_API_KEY
+from app.services.evidence_search import fetch_source_page_text, deduplicate_syndicated_sources
 
 logger = logging.getLogger("truthlens.tavily")
 
 TAVILY_SEARCH_URL = "https://api.tavily.com/search"
 DEFAULT_TIMEOUT_SECONDS = 9.0
 
-# Authoritative primary news, scientific, and institutional domains
+# Authoritative primary news, scientific, regulatory, and institutional domains
 AUTHORITATIVE_DOMAINS = {
     "reuters.com", "apnews.com", "bbc.com", "bbc.co.uk", "who.int", "cdc.gov",
     "nih.gov", "nasa.gov", "nature.com", "thelancet.com", "sciencemag.org",
     "un.org", "pib.gov.in", "thehindu.com", "indianexpress.com", "nytimes.com",
     "washingtonpost.com", "wsj.com", "bloomberg.com", "ft.com", "economist.com",
     "snopes.com", "politifact.com", "factcheck.org", "afp.com", "aljazeera.com",
-    "usatoday.com", "leadstories.com", "fullfact.org"
+    "usatoday.com", "leadstories.com", "fullfact.org", "fda.gov", "sec.gov",
+    "fifa.com", "olympics.com", "isro.gov.in", "esa.int"
 }
 
 # Indicators that a source is reporting a fact-check refutation or debunk
@@ -69,6 +71,9 @@ def inspect_source_stance(source: Dict[str, Any], claim: str = "") -> str:
     without confirming the claim's core event are classified as neutral.
     """
     text_to_check = f"{source.get('title', '')} {source.get('description', '')}".lower()
+    raw_content = source.get("raw_content", "")
+    if raw_content:
+        text_to_check += " " + raw_content[:1000].lower()
     
     # 1. Check for explicit debunk / refutation markers
     for pattern in DEBUNK_INDICATORS:
@@ -127,7 +132,7 @@ def search_tavily(
         "query": clean_query,
         "search_depth": search_depth,
         "include_answer": True,
-        "include_raw_content": False,
+        "include_raw_content": True,
         "max_results": max_results
     }
     if include_domains:
@@ -175,6 +180,7 @@ def search_tavily(
             raw_url = item.get("url", "")
             domain = extract_domain(raw_url)
             is_auth = any(domain.endswith(auth_dom) for auth_dom in AUTHORITATIVE_DOMAINS)
+            raw_content = item.get("raw_content") or ""
             
             source_obj = {
                 "title": item.get("title") or "Web Search Reference",
@@ -182,14 +188,13 @@ def search_tavily(
                 "domain": domain,
                 "url": raw_url,
                 "description": item.get("content") or "",
+                "raw_content": raw_content[:2000],
                 "published_date": item.get("published_date") or None,
                 "relevance_score": round(float(item.get("score", 0.0)), 3),
                 "authoritative": is_auth,
                 "source_type": "web_search",
                 "reliability": "High" if is_auth else "Moderate"
             }
-            # Evaluate source stance
-            source_obj["stance"] = inspect_source_stance(source_obj)
             clean_sources.append(source_obj)
 
         return {
@@ -220,11 +225,13 @@ def search_tavily(
 
 def search_claims_evidence(claims: List[str], full_text: Optional[str] = None) -> Dict[str, Any]:
     """
-    Orchestrates targeted Tavily searches across top extracted claims and named attributions.
-    Conducts multi-track queries:
+    Universal Dynamic Search Execution:
+    Conducts topic-adaptive multi-track queries:
     1. Distilled core factual search for corroboration.
-    2. Debunk / fact-check search for contradictions.
-    3. Attribution investigation for named organisations or authorities.
+    2. Debunk / fact-check targeted search for contradictions.
+    3. Topic-adaptive official authority query (government, health, sports, science, tech).
+    4. Attribution confirmation query for cited organizations.
+    Deduplicates syndicated sources and performs deep stance inspection.
     """
     if not is_tavily_configured() or not claims:
         return {
@@ -236,7 +243,7 @@ def search_claims_evidence(claims: List[str], full_text: Optional[str] = None) -
             "attribution_findings": []
         }
 
-    from app.services.claim_extractor import generate_verification_queries
+    from app.services.claim_extractor import generate_adaptive_verification_queries
 
     collected_sources: List[Dict[str, Any]] = []
     seen_urls = set()
@@ -251,7 +258,7 @@ def search_claims_evidence(claims: List[str], full_text: Optional[str] = None) -
         if len(claim_clean) < 10:
             continue
 
-        q_pkg = generate_verification_queries(claim_clean, full_text)
+        q_pkg = generate_adaptive_verification_queries(claim_clean, full_text=full_text)
         distilled = q_pkg.get("distilled_query") or claim_clean[:70]
         debunk_q = q_pkg.get("debunk_query") or f"{distilled} fact check"
 
@@ -273,7 +280,16 @@ def search_claims_evidence(claims: List[str], full_text: Optional[str] = None) -
                     seen_urls.add(s["url"])
                     collected_sources.append(s)
 
-        # 3. Attribution query if organization/authority is present
+        # 3. Topic-adaptive authority queries
+        for auth_q in q_pkg.get("authority_queries", [])[:1]:
+            res_auth = search_tavily(auth_q, max_results=2)
+            if res_auth.get("success"):
+                for s in res_auth.get("sources", []):
+                    if s["url"] and s["url"] not in seen_urls:
+                        seen_urls.add(s["url"])
+                        collected_sources.append(s)
+
+        # 4. Attribution query if organization/authority is present
         for attr_q in q_pkg.get("attribution_queries", [])[:2]:
             res_attr = search_tavily(attr_q, max_results=2)
             if res_attr.get("success"):
@@ -291,9 +307,12 @@ def search_claims_evidence(claims: List[str], full_text: Optional[str] = None) -
                         "detail": f"Search for {attr_q} returned no official or authoritative institutional domains."
                     })
 
+    # Deduplicate syndicated stories
+    deduped_sources = deduplicate_syndicated_sources(collected_sources)
+
     # Inspect all collected sources for stances against extracted claims
     primary_claim = claims[0] if claims else (full_text or "")
-    for s in collected_sources:
+    for s in deduped_sources:
         stance = "neutral"
         matched_claim = primary_claim
 
@@ -329,11 +348,11 @@ def search_claims_evidence(claims: List[str], full_text: Optional[str] = None) -
             })
 
     # Sort sources: authoritative first, then by relevance score
-    collected_sources.sort(key=lambda x: (1 if x.get("authoritative") else 0, x.get("relevance_score", 0)), reverse=True)
+    deduped_sources.sort(key=lambda x: (1 if x.get("authoritative") else 0, x.get("relevance_score", 0)), reverse=True)
 
     return {
         "configured": True,
-        "sources": collected_sources[:8],
+        "sources": deduped_sources[:8],
         "contradicting": contradicting,
         "supporting": supporting,
         "answers": answers,

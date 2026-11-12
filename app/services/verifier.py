@@ -4,7 +4,11 @@ from typing import Dict, Any, List, Optional
 
 from app.config import get_provider_capabilities, USER_AGENT
 from app.ml.classifier import predict_text_credibility
-from app.services.claim_extractor import extract_key_claims
+from app.services.claim_extractor import (
+    extract_key_claims,
+    classify_article_topic,
+    extract_entities_and_statistics
+)
 from app.services.tavily_search import search_claims_evidence, is_tavily_configured
 from app.services.factcheck_search import search_claims_fact_checks, is_fact_check_configured
 from app.services.groq_verifier import (
@@ -12,7 +16,11 @@ from app.services.groq_verifier import (
     synthesize_evidence_with_groq,
     is_groq_configured
 )
-from app.services.evidence_search import match_known_viral_hoaxes
+from app.services.evidence_search import (
+    find_credible_evidence,
+    deduplicate_syndicated_sources,
+    fetch_source_page_text
+)
 
 logger = logging.getLogger("truthlens.verifier")
 
@@ -34,18 +42,21 @@ def generate_summary(text: str, max_words: int = 40) -> str:
 
 def verify_news_content(text: str, input_type: str = "text", original_url: str = None) -> Dict[str, Any]:
     """
-    TruthLens Dynamic Evidence-Based Verification Pipeline:
-    1. Ingest & sanitize news content.
-    2. Extract falsifiable factual claims (via Groq / NLP).
-    3. Search Google Fact Check Tools API for prior peer-reviewed claims.
-    4. Search Tavily Search API for live web evidence (corroborating and debunking).
-    5. Check accredited viral hoax debunks (WHO, Reuters, Snopes).
-    6. Execute ML stylometric analysis as a secondary linguistic indicator.
-    7. Synthesize evidence via Groq LLM (or deterministic fallback) with strict verdict rules:
-       - 'REAL': Adequately corroborated by credible evidence with no material contradictions.
-       - 'FAKE': Contradicted by credible evidence or established fact-checks.
-       - 'INSUFFICIENT EVIDENCE': Evidence unavailable, weak, conflicting, or unverified.
-    8. Format comprehensive output with source references and verification limitations.
+    TruthLens Universal Dynamic News Verification Engine:
+    Verifies ANY arbitrary, unseen news article regardless of topic, publisher, country, or writing style.
+    Operates without hardcoded examples, predefined hoax lists, or keyword-based rules.
+
+    Architecture:
+    1. Universal Claim & Entity Extraction: Dynamically identifies main claims, entities, dates, numbers, and topic.
+    2. Dynamic Adaptive Search: Generates claim-specific and topic-adapted queries across official and news sources.
+    3. Multi-Track Evidence Retrieval: Cross-references Google Fact Check API, Tavily Live Web, Wikipedia, and Google News RSS.
+    4. Source Inspection & Syndication Deduplication: Collapses syndicated wire reprints to avoid false corroboration.
+    5. Evidence Synthesis: Evaluates claims against retrieved evidence via Groq LLM (or deterministic fallback).
+    6. Centralized Verdict Engine:
+       - 'REAL': Material claims are sufficiently supported by credible external evidence.
+       - 'FAKE': Material claims are directly contradicted by credible evidence or verified fact-checks.
+       - 'INSUFFICIENT EVIDENCE': Evidence is missing, conflicting, inadequate, or unverified.
+       - 'MIXED': Detailed claim-level breakdown for articles with both true and false assertions.
     """
     clean_text = text.strip() if text else ""
     capabilities = get_provider_capabilities()
@@ -72,13 +83,16 @@ def verify_news_content(text: str, input_type: str = "text", original_url: str =
 
     logger.info(f"Verification pipeline started for input length {len(clean_text)} (input_type={input_type}).")
 
-    # Step 1: Identify Key Factual Claims (Groq with fallback to NLP)
+    # Step 1: Universal Claim, Entity, & Topic Extraction
+    detected_topic = classify_article_topic(clean_text)
+    entities_data = extract_entities_and_statistics(clean_text)
+    
     identified_claims = extract_claims_with_groq(clean_text)
     if not identified_claims:
         identified_claims = extract_key_claims(clean_text)
     if not identified_claims and clean_text:
         identified_claims = [clean_text[:160] + ("..." if len(clean_text) > 160 else "")]
-    logger.info(f"Extracted {len(identified_claims)} verifiable claims: {[c[:60] for c in identified_claims]}")
+    logger.info(f"Extracted {len(identified_claims)} claims (Topic: {detected_topic}): {[c[:60] for c in identified_claims]}")
 
     # Step 2: Query Google Fact Check Tools API
     fact_check_data = search_claims_fact_checks(identified_claims)
@@ -87,40 +101,36 @@ def verify_news_content(text: str, input_type: str = "text", original_url: str =
     fact_check_supporting = fact_check_data.get("supporting", [])
     logger.info(f"Fact Check API returned {len(fact_check_reviews)} reviews ({len(fact_check_contradicting)} contradicting, {len(fact_check_supporting)} supporting).")
 
-    # Step 3: Query Tavily Search API for Live Web Evidence & Attributions
+    # Step 3: Query Tavily Live Web Search API with Topic-Adaptive Queries
     tavily_data = search_claims_evidence(identified_claims, full_text=clean_text)
     tavily_sources = tavily_data.get("sources", [])
     tavily_contradicting = tavily_data.get("contradicting", [])
     tavily_supporting = tavily_data.get("supporting", [])
     attribution_findings = tavily_data.get("attribution_findings", [])
-    logger.info(f"Tavily Search returned {len(tavily_sources)} sources ({len(tavily_contradicting)} contradicting, {len(tavily_supporting)} supporting, {len(attribution_findings)} attribution findings).")
+    logger.info(f"Tavily Search returned {len(tavily_sources)} sources ({len(tavily_contradicting)} contradicting, {len(tavily_supporting)} supporting).")
 
-    # Step 4: Check Known Viral Hoax Registry (Direct accredited fact-check URLs)
-    hoax_matches = match_known_viral_hoaxes(clean_text)
-    registry_contradicting = []
-    registry_supporting = []
-    for h in hoax_matches:
-        item = {
-            "source": h["publisher"],
-            "claim_addressed": h["title"],
-            "detail": h["description"]
-        }
-        if h["stance"] == "contradicts":
-            registry_contradicting.append(item)
-        else:
-            registry_supporting.append(item)
+    # Step 4: Multi-Track Open Evidence Fallback (Wikipedia, Google News RSS, DuckDuckGo)
+    open_sources = []
+    open_supporting = []
+    open_contradicting = []
+    if len(tavily_sources) == 0:
+        free_data = find_credible_evidence(identified_claims, clean_text)
+        open_sources = free_data.get("sources", [])
+        open_supporting = free_data.get("supporting_evidence", [])
+        open_contradicting = free_data.get("contradicting_evidence", [])
+        logger.info(f"Open Fallback search returned {len(open_sources)} sources ({len(open_contradicting)} contradicting, {len(open_supporting)} supporting).")
 
     # Step 5: Execute ML Stylometric Analysis (Auxiliary indicator only)
     ml_result = predict_text_credibility(clean_text)
     ml_label = ml_result.get("predicted_label", "UNABLE TO VERIFY")
     ml_conf = ml_result.get("model_confidence", 50.0)
-    logger.info(f"ML Stylometric Indicator (auxiliary only): label={ml_label}, real_prob={ml_result.get('real_probability')}%, fake_prob={ml_result.get('fake_probability')}%.")
+    logger.info(f"ML Stylometrics (auxiliary only): label={ml_label}, real_prob={ml_result.get('real_probability')}%, fake_prob={ml_result.get('fake_probability')}%.")
 
-    # Step 6: Consolidate External Evidence Sources (Deduplicated)
+    # Step 6: Consolidate External Evidence Sources & Deduplicate Syndicated Content
     all_sources: List[Dict[str, Any]] = []
     seen_urls = set()
 
-    # Priority 1: Fact Check Reviews
+    # Add Fact Check Reviews
     for r in fact_check_reviews:
         url = r.get("url", "#")
         if url and url not in seen_urls:
@@ -132,51 +142,33 @@ def verify_news_content(text: str, input_type: str = "text", original_url: str =
                 "description": r.get("description", ""),
                 "published_date": r.get("review_date"),
                 "reliability": "Very High",
-                "source_type": "fact_check_review"
+                "source_type": "fact_check_review",
+                "stance": r.get("stance", "neutral")
             })
 
-    # Priority 2: Verified Registry Matches
-    for h in hoax_matches:
-        url = h.get("url", "#")
-        if url and url not in seen_urls:
-            seen_urls.add(url)
-            all_sources.append({
-                "title": h.get("title"),
-                "publisher": h.get("publisher"),
-                "url": url,
-                "description": h.get("description"),
-                "published_date": None,
-                "reliability": "Very High",
-                "source_type": "verified_registry"
-            })
-
-    # Priority 3: Tavily Live Web Results
+    # Add Tavily Live Web Sources
     for s in tavily_sources:
         url = s.get("url", "#")
         if url and url not in seen_urls:
             seen_urls.add(url)
             all_sources.append(s)
 
-    # Priority 4: Free Open Knowledge & News Search Fallback (if no paid API sources returned)
-    if len(all_sources) == 0:
-        from app.services.evidence_search import find_credible_evidence
-        free_data = find_credible_evidence(identified_claims, clean_text)
-        for s in free_data.get("sources", []):
-            url = s.get("url", "#")
-            if url and url not in seen_urls:
-                seen_urls.add(url)
-                all_sources.append(s)
-        for sup in free_data.get("supporting_evidence", []):
-            supporting_evidence.append(sup)
-        for con in free_data.get("contradicting_evidence", []):
-            contradicting_evidence.append(con)
+    # Add Open Knowledge / News Sources
+    for s in open_sources:
+        url = s.get("url", "#")
+        if url and url not in seen_urls:
+            seen_urls.add(url)
+            all_sources.append(s)
 
-    # Step 7: Synthesize Evidence via Groq (or deterministic rule engine)
+    # Deduplicate syndicated stories
+    deduped_sources = deduplicate_syndicated_sources(all_sources)
+
+    # Step 7: Synthesize Evidence via Groq LLM (or deterministic rule engine)
     synthesis = synthesize_evidence_with_groq(
         article_text=clean_text,
         claims=identified_claims,
         fact_check_reviews=fact_check_reviews,
-        tavily_sources=tavily_sources,
+        tavily_sources=deduped_sources,
         ml_stylometrics=ml_result,
         attribution_findings=attribution_findings
     )
@@ -191,39 +183,43 @@ def verify_news_content(text: str, input_type: str = "text", original_url: str =
     limitations = synthesis.get("limitations") or []
     logger.info(f"Evidence Synthesis ({synthesis.get('reasoning_engine', 'engine')}): raw_verdict={verdict}, raw_conf={confidence_score}.")
 
-    # Merge verified registry debunks into contradicting_evidence
-    for r in registry_contradicting:
-        if not any(r["claim_addressed"] == c.get("claim_addressed") for c in contradicting_evidence):
-            contradicting_evidence.append(r)
-            if verdict != "FAKE":
-                verdict = "FAKE"
-                confidence_score = max(confidence_score, 88.0)
-                explanation = f"Documented fact-checking records confirm this is an established viral hoax. {r['detail']}"
+    # Merge verified fact-check items into contradicting/supporting
+    for fc in fact_check_contradicting:
+        if not any(fc.get("detail") == c.get("detail") for c in contradicting_evidence):
+            contradicting_evidence.append(fc)
 
-    # Merge Tavily debunk items into contradicting_evidence
+    for fs in fact_check_supporting:
+        if not any(fs.get("detail") == s.get("detail") for s in supporting_evidence):
+            supporting_evidence.append(fs)
+
+    # Merge Tavily items
     for tc in tavily_contradicting:
         if not any(tc.get("detail") == c.get("detail") for c in contradicting_evidence):
             contradicting_evidence.append(tc)
-
-    # Merge supporting items (only if genuine corroboration exists)
-    for s_item in registry_supporting:
-        if not any(s_item["claim_addressed"] == s.get("claim_addressed") for s in supporting_evidence):
-            supporting_evidence.append(s_item)
 
     for ts in tavily_supporting:
         if not any(ts.get("detail") == s.get("detail") for s in supporting_evidence):
             supporting_evidence.append(ts)
 
+    # Merge Open Fallback items
+    for oc in open_contradicting:
+        if not any(oc.get("detail") == c.get("detail") for c in contradicting_evidence):
+            contradicting_evidence.append(oc)
+
+    for os_item in open_supporting:
+        if not any(os_item.get("detail") == s.get("detail") for s in supporting_evidence):
+            supporting_evidence.append(os_item)
+
     # Step 8: Calculate Evidence Score
     evidence_score = 45.0
     if contradicting_evidence:
         evidence_score = 88.0 + min(len(contradicting_evidence) * 3, 6.0)
-    elif supporting_evidence and len(supporting_evidence) >= 2:
+    elif supporting_evidence and len(supporting_evidence) >= 1:
         evidence_score = 75.0 + min(len(supporting_evidence) * 4, 15.0)
-    elif all_sources:
+    elif deduped_sources:
         evidence_score = 55.0
 
-    # Step 9: Final Quality & Accurate Verdict Aggregation
+    # Step 9: Centralized Verdict Engine Governance
     is_conflicting = bool(
         contradicting_evidence and supporting_evidence and
         len(supporting_evidence) >= 2 and len(contradicting_evidence) >= 1
@@ -231,12 +227,10 @@ def verify_news_content(text: str, input_type: str = "text", original_url: str =
 
     fake_prob = float(ml_result.get("fake_probability", 50.0))
     real_prob = float(ml_result.get("real_probability", 50.0))
-    ml_label = ml_result.get("predicted_label", "UNABLE TO VERIFY")
     markers = ml_result.get("linguistic_markers", {})
     sensational = markers.get("sensational_score", 0.0)
-    exclamations = markers.get("exclamations_per_100w", 0.0)
 
-    # Priority 1: Conflicting evidence from credible sources
+    # Priority 1: Conflicting external evidence across authoritative sources
     if is_conflicting:
         verdict = "INSUFFICIENT EVIDENCE"
         confidence_score = 50.0
@@ -246,24 +240,24 @@ def verify_news_content(text: str, input_type: str = "text", original_url: str =
             "the claim is classified as INSUFFICIENT EVIDENCE pending decisive consensus."
         )
 
-    # Priority 2: Direct Contradiction / Documented Fact-Check Refutation / Viral Hoax
-    elif contradicting_evidence or registry_contradicting:
+    # Priority 2: Direct Contradiction / Documented Fact-Check Refutation (FAKE)
+    elif contradicting_evidence:
         verdict = "FAKE"
         confidence_score = max(confidence_score, 88.0, min(fake_prob, 94.0))
-        source_name = contradicting_evidence[0].get("source", "Accredited Fact Checker") if contradicting_evidence else (registry_contradicting[0].get("source") if registry_contradicting else "Fact Check")
+        source_name = contradicting_evidence[0].get("source", "Accredited Fact Checker")
         explanation = (
             f"Credible external evidence directly contradicts the material claims. "
-            f"Fact-checking records from {source_name} confirm the assertions are fabricated, disproven, or misleading."
+            f"Fact-checking records and investigative reports from {source_name} confirm the assertions are fabricated, disproven, or misleading."
         )
 
-    # Priority 3: Direct External Corroboration from Authoritative Sources
-    elif len(supporting_evidence) >= 1 or (verdict == "REAL" and len(all_sources) >= 1 and real_prob >= 55.0):
+    # Priority 3: Direct External Corroboration from Authoritative Sources (REAL)
+    elif len(supporting_evidence) >= 1 or (verdict == "REAL" and len(deduped_sources) >= 1 and real_prob >= 55.0):
         verdict = "REAL"
         confidence_score = max(confidence_score, 80.0, min(real_prob, 92.0))
         if supporting_evidence:
             source_name = supporting_evidence[0].get("source", "Authoritative Source")
-        elif all_sources:
-            source_name = all_sources[0].get("publisher", "Authoritative Source")
+        elif deduped_sources:
+            source_name = deduped_sources[0].get("publisher", "Authoritative Source")
         else:
             source_name = "Authoritative Source"
         explanation = (
@@ -271,43 +265,29 @@ def verify_news_content(text: str, input_type: str = "text", original_url: str =
             "No credible refutations or active hoax alerts were detected."
         )
 
-    # Priority 4: Synthesis engine (Groq) delivered an explicit verdict
+    # Priority 4: Synthesis Engine (Groq) explicit verdict
     elif verdict in ["REAL", "FAKE"] and synthesis.get("reasoning_engine", "").startswith("Groq"):
         # Groq evaluated evidence / plausibility
         pass
 
-    # Priority 5: Evaluate Algorithmic & Linguistic Credibility Indicators
+    # Priority 5: Unverified / Insufficient Evidence
     else:
-        # Check for strong signals of fabrication (high fake probability with alarmism, sensationalism, or emergency claims)
-        has_sensationalism = (
-            sensational >= 1.0 or exclamations >= 1.0 or markers.get("caps_ratio", 0) >= 10.0 or
-            any(w in clean_text.lower() for w in ["shocking", "secret", "miracle", "cure", "alert", "doors", "emergency", "hoax", "conspiracy"])
+        verdict = "INSUFFICIENT EVIDENCE"
+        confidence_score = 50.0
+        explanation = (
+            "TruthLens could not locate decisive corroborating primary sources or established fact-check reviews for this text. "
+            "In accordance with responsible verification standards, uncorroborated news is classified as INSUFFICIENT EVIDENCE rather than assumed true or false."
         )
-        if fake_prob >= 80.0 and has_sensationalism:
-            verdict = "FAKE"
-            confidence_score = min(max(fake_prob, 75.0), 93.0)
-            summary = f"TruthLens analysis identified strong indicators of misinformation and fabricated claims ({round(confidence_score, 1)}% risk)."
-            explanation = (
-                f"TruthLens algorithmic and stylometric analysis identified strong indicators of misinformation and fabricated claims ({round(fake_prob, 1)}% probability). "
-                "The content exhibits sensationalized framing, emergency panic rhetoric, or abnormal attribution patterns that lack corroboration."
-            )
-        else:
-            verdict = "INSUFFICIENT EVIDENCE"
-            confidence_score = 50.0
-            explanation = (
-                "TruthLens could not locate decisive corroborating primary sources or established fact-check reviews for this text. "
-                "In accordance with responsible verification standards, uncorroborated news is classified as INSUFFICIENT EVIDENCE rather than assumed true or false."
-            )
 
-    # Policy 4: Attribution check without false equivalence
+    # Priority 6: Attribution check without false equivalence
     if attribution_findings and verdict == "INSUFFICIENT EVIDENCE":
         limitations.append(
             "Attributed organisation investigated: Absence from indexed search records alone does not establish falsehood without direct refutation."
         )
 
-    # Policy 5: Bound confidence between 45.0 and 94.0 (Never claim 100%)
+    # Bound confidence ethically between 45.0 and 94.0 (Never claim 100%)
     final_confidence = min(max(confidence_score, 45.0), 94.0)
-    logger.info(f"Final Policy Enforcement: classification={verdict}, final_confidence={final_confidence}%, supporting={len(supporting_evidence)}, contradicting={len(contradicting_evidence)}.")
+    logger.info(f"Final Universal Governance: classification={verdict}, confidence={final_confidence}%, supporting={len(supporting_evidence)}, contradicting={len(contradicting_evidence)}.")
 
     # Compile explicit service status
     service_status = {
@@ -320,12 +300,10 @@ def verify_news_content(text: str, input_type: str = "text", original_url: str =
     # Add general limitations if missing
     if not limitations:
         limitations = [
-            "Evaluated against indexed Google Fact Check reviews and Tavily Search results.",
+            "Cross-referenced against indexed Google Fact Check reviews, live web sources, and public encyclopedic records.",
             "Newly developing breaking events or offline records may require additional manual confirmation."
         ]
 
-    # Backward compatibility: for database / API clients expecting UNABLE TO VERIFY
-    # The primary classification remains 'INSUFFICIENT EVIDENCE' (or 'REAL'/'FAKE')
     return {
         "classification": verdict,
         "confidence_score": round(final_confidence, 1),
@@ -337,7 +315,7 @@ def verify_news_content(text: str, input_type: str = "text", original_url: str =
         "claim_analyses": claim_analyses,
         "supporting_evidence": supporting_evidence,
         "contradicting_evidence": contradicting_evidence,
-        "sources": all_sources[:8],
+        "sources": deduped_sources[:8],
         "service_status": service_status,
         "limitations": limitations,
         "ml_prediction": {

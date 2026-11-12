@@ -1,11 +1,13 @@
 import re
 from typing import List, Dict, Any, Optional
 
-CLAIM_INDICATORS = [
+CLAIM_ACTION_INDICATORS = [
     r'\bclaims?\b', r'\bannounced?\b', r'\bdiscovered?\b', r'\bcures?\b',
     r'\bcauses?\b', r'\bconfirmed?\b', r'\breported?\b', r'\bproves?\b',
-    r'\brequires?\b', r'\bbanned?\b', r'\bsecretly\b', r'\bpassed law\b',
-    r'\bdied\b', r'\bkilled\b', r'\binvented\b', r'\breleased\b', r'\bdeclares?\b'
+    r'\brequires?\b', r'\bbanned?\b', r'\bpassed law\b', r'\bdied\b',
+    r'\bkilled\b', r'\binvented\b', r'\breleased\b', r'\bdeclares?\b',
+    r'\bapproved?\b', r'\bsigned?\b', r'\bvoted?\b', r'\bwon\b',
+    r'\bdefeated\b', r'\blaunched\b', r'\bhalted\b', r'\bwarned?\b'
 ]
 
 COMMON_STOPWORDS = {
@@ -14,15 +16,77 @@ COMMON_STOPWORDS = {
     "have", "has", "had", "do", "does", "did", "this", "that", "these", "those",
     "it", "its", "they", "them", "their", "we", "us", "our", "you", "your",
     "today", "yesterday", "tomorrow", "urgently", "urgent", "forward", "share",
-    "official", "officially", "secretly", "reportedly", "allegedly"
+    "official", "officially", "secretly", "reportedly", "allegedly", "according",
+    "says", "said", "also", "just", "now", "well", "very", "about"
 }
 
-# Organizations, authorities, agencies, ministries
+TOPIC_KEYWORDS = {
+    "health": [
+        "disease", "cure", "vaccine", "health", "hospital", "doctor", "virus",
+        "drug", "clinical", "treatment", "who", "fda", "cdc", "medical", "cancer",
+        "covid", "patient", "infection", "symptoms", "therapy", "pandemic"
+    ],
+    "science": [
+        "nasa", "space", "orbit", "planet", "moon", "telescope", "physics",
+        "astronomy", "quantum", "asteroid", "galaxy", "biology", "scientific",
+        "researchers", "study", "satellite", "isro", "esa", "earth", "climate",
+        "atmosphere", "species", "fossil", "laboratory", "cosmic"
+    ],
+    "government": [
+        "ministry", "parliament", "congress", "president", "minister", "law",
+        "bill", "policy", "supreme court", "election", "vote", "treaty", "governor",
+        "department", "senate", "cabinet", "administration", "order", "decree",
+        "ordinance", "legislation", "ambassador", "federal"
+    ],
+    "sports": [
+        "cup", "tournament", "championship", "league", "coach", "player", "match",
+        "score", "goal", "fifa", "olympics", "nba", "nfl", "cricket", "football",
+        "tennis", "medal", "trophy", "stadium", "referee", "won", "defeated"
+    ],
+    "technology": [
+        "software", "ai", "model", "chip", "semiconductor", "algorithm", "google",
+        "apple", "microsoft", "release", "update", "app", "cybersecurity",
+        "hacker", "device", "hardware", "server", "data", "platform"
+    ],
+    "finance": [
+        "shares", "stock", "market", "inflation", "interest rate", "bank", "revenue",
+        "profit", "gdp", "economy", "crypto", "central bank", "investor", "dividend",
+        "recession", "currency", "treasury", "sec", "fed", "monetary"
+    ],
+    "international": [
+        "united nations", "treaty", "war", "foreign", "ambassador", "summit",
+        "sanctions", "diplomacy", "nato", "eu", "border", "ceasefire", "accord"
+    ]
+}
+
 ORG_PATTERNS = [
-    r'\b(?:the\s+)?([A-Z][a-zA-Z0-9\s&,-]{2,40}?\s+(?:Ministry|Department|Agency|Organization|Organisation|Commission|Council|Authority|Institute|Bureau|Federation|Committee|Association|Administration))\b',
-    r'\bAccording to\s+(?:the\s+)?([A-Z][a-zA-Z0-9\s&,-]{2,40}?)(?:,|\s+in\b|\s+that\b|\s+has\b|\s+have\b|\s+announced\b|\s+reported\b)',
-    r'\b([A-Z][a-zA-Z0-9\s&,-]{2,40}?)\s+(?:announced|confirmed|reported|claimed|discovered|stated|ruled)\s+that\b'
+    r'\b(?:the\s+)?([A-Z][a-zA-Z0-9\s&,-]{2,45}?\s+(?:Ministry|Department|Agency|Organization|Organisation|Commission|Council|Authority|Institute|Bureau|Federation|Committee|Association|Administration|Observatory|University))\b',
+    r'\bAccording to\s+(?:the\s+)?([A-Z][a-zA-Z0-9\s&,-]{2,45}?)(?:,|\s+in\b|\s+that\b|\s+has\b|\s+have\b|\s+announced\b|\s+reported\b)',
+    r'\b([A-Z][a-zA-Z0-9\s&,-]{2,45}?)\s+(?:announced|confirmed|reported|claimed|discovered|stated|ruled|warned|advised)\s+that\b'
 ]
+
+def classify_article_topic(text: str) -> str:
+    """
+    Dynamically identifies the subject domain of the article
+    (health, science, government, sports, technology, finance, international, or general).
+    Used to select targeted authoritative source strategies without rigid hardcoding.
+    """
+    if not text:
+        return "general"
+
+    text_lower = text.lower()
+    topic_scores = {topic: 0 for topic in TOPIC_KEYWORDS}
+
+    for topic, keywords in TOPIC_KEYWORDS.items():
+        for kw in keywords:
+            if re.search(r'\b' + re.escape(kw) + r'\b', text_lower):
+                topic_scores[topic] += 1
+
+    sorted_topics = sorted(topic_scores.items(), key=lambda x: x[1], reverse=True)
+    if sorted_topics and sorted_topics[0][1] >= 2:
+        return sorted_topics[0][0]
+
+    return "general"
 
 def extract_named_attributions(text: str) -> List[str]:
     """
@@ -39,12 +103,10 @@ def extract_named_attributions(text: str) -> List[str]:
         matches = re.finditer(pat, text, re.IGNORECASE)
         for m in matches:
             val = m.group(1).strip()
-            # Clean leading noise such as 'called', 'named', 'known as', 'an organisation called'
+            # Clean leading noise
             val = re.sub(r'^(?:an?\s+)?(?:organisation|organization|institution|agency|group)?\s*(?:called|named|known as|dubbed)\s+', '', val, flags=re.IGNORECASE).strip()
             val = re.sub(r'^(?:the|an?)\s+', '', val, flags=re.IGNORECASE).strip()
-            # Clean trailing punctuation
             val = re.sub(r'[,.:;]+$', '', val).strip()
-            # Avoid single generic words or excessively long sentences
             words = val.split()
             if 1 < len(words) <= 7:
                 norm = val.lower()
@@ -54,6 +116,26 @@ def extract_named_attributions(text: str) -> List[str]:
 
     return found
 
+def extract_entities_and_statistics(text: str) -> Dict[str, List[str]]:
+    """
+    Extracts key verifiable entities: numbers, percentages, currency, dates/years, proper names.
+    """
+    if not text:
+        return {"numbers": [], "dates": [], "entities": [], "attributions": []}
+
+    numbers = re.findall(r'\b\d+(?:,\d+)*(?:\.\d+)?%?\b|\$\d+(?:,\d+)*(?:\.\d+)?', text)
+    dates = re.findall(r'\b(?:19|20)\d{2}\b|\b(?:January|February|March|April|May|June|July|August|September|October|November|December)\s+\d{1,2}(?:,\s+\d{4})?\b', text, re.IGNORECASE)
+    proper_nouns = re.findall(r'\b[A-Z][a-z]+(?:\s+[A-Z][a-z]+)*\b', text)
+    filtered_nouns = [pn for pn in proper_nouns if len(pn) > 3 and pn.lower() not in COMMON_STOPWORDS][:6]
+    attributions = extract_named_attributions(text)
+
+    return {
+        "numbers": list(set(numbers[:5])),
+        "dates": list(set(dates[:4])),
+        "entities": list(set(filtered_nouns)),
+        "attributions": attributions
+    }
+
 def distill_claim_keywords(claim: str, max_words: int = 7) -> str:
     """
     Distills a verbose claim sentence into 4-7 salient search keywords.
@@ -62,9 +144,7 @@ def distill_claim_keywords(claim: str, max_words: int = 7) -> str:
     if not claim:
         return ""
 
-    # Remove quotes, brackets, and special punctuation
     clean = re.sub(r'["\'\(\)\[\]\{\},:;!?\-.]', ' ', claim)
-    # Strip common conversational phrases
     clean = re.sub(r'\b(forwarded as received|urgent alert|breaking news|doctors stunned|secretly leaked|shocking discovery)\b', '', clean, flags=re.I)
     
     words = clean.split()
@@ -81,20 +161,41 @@ def distill_claim_keywords(claim: str, max_words: int = 7) -> str:
         
     return " ".join(salient[:max_words])
 
-def generate_verification_queries(claim: str, full_text: Optional[str] = None) -> Dict[str, Any]:
+def generate_adaptive_verification_queries(claim: str, topic: Optional[str] = None, full_text: Optional[str] = None) -> Dict[str, Any]:
     """
-    Generates targeted, multi-faceted verification search queries for a claim:
-    1. Distilled core claim keywords.
-    2. Fact-check and debunk query.
-    3. Attribution query if an organization or authority is named.
+    Universal Topic-Adaptive Query Generation:
+    Generates multi-faceted, intelligent search queries for any submitted claim:
+    1. Distilled core claim assertion query.
+    2. Fact-check & debunk inquiry query.
+    3. Topic-specific official authority query (government, health, sports, science, tech, finance).
+    4. Attribution confirmation query if an institution is cited.
     """
     distilled = distill_claim_keywords(claim)
+    detected_topic = topic or classify_article_topic(full_text or claim)
     attributions = extract_named_attributions(claim)
     if full_text and not attributions:
         attributions = extract_named_attributions(full_text)
 
+    # Core assertion queries
     debunk_query = f"{distilled} fact check" if distilled else f"{claim[:60]} fact check"
-    
+    supporting_query = f"{distilled} official announcement" if distilled else f"{claim[:60]} confirmed"
+
+    # Topic-adaptive queries
+    authority_queries = []
+    if detected_topic == "health":
+        authority_queries.append(f"{distilled} WHO CDC health authority")
+    elif detected_topic == "science":
+        authority_queries.append(f"{distilled} NASA scientific research study")
+    elif detected_topic == "government":
+        authority_queries.append(f"{distilled} government ministry official statement")
+    elif detected_topic == "sports":
+        authority_queries.append(f"{distilled} official tournament results")
+    elif detected_topic == "technology":
+        authority_queries.append(f"{distilled} official documentation announcement")
+    elif detected_topic == "finance":
+        authority_queries.append(f"{distilled} central bank regulatory filing")
+
+    # Attribution queries
     attribution_queries = []
     for org in attributions:
         attribution_queries.append(f'"{org}"')
@@ -104,40 +205,42 @@ def generate_verification_queries(claim: str, full_text: Optional[str] = None) -
     return {
         "distilled_query": distilled,
         "debunk_query": debunk_query,
+        "supporting_query": supporting_query,
+        "detected_topic": detected_topic,
+        "authority_queries": authority_queries,
         "attributions": attributions,
         "attribution_queries": attribution_queries
     }
 
+def generate_verification_queries(claim: str, full_text: Optional[str] = None) -> Dict[str, Any]:
+    """Backward compatibility wrapper for verifier and search pipeline."""
+    return generate_adaptive_verification_queries(claim, full_text=full_text)
+
 def extract_key_claims(text: str) -> List[str]:
     """
-    Identifies and extracts verifiable key factual claims from input text.
-    Filters out noise, rhetorical questions, and conversational padding.
+    Identifies and extracts verifiable key factual claims from arbitrary input text.
+    Filters out conversational noise, rhetorical questions, and subjective opinions.
     """
     if not text:
         return []
 
-    # Clean text
     clean_text = re.sub(r'\s+', ' ', text.strip())
-    
-    # Split by sentence boundaries (. ? ! or newlines)
     raw_sentences = re.split(r'(?<=[.!?])\s+', clean_text)
     
     scored_claims = []
     
     for sentence in raw_sentences:
         s = sentence.strip()
-        # Filter very short sentences
         if len(s) < 20:
             continue
-        # Skip pure conversational phrases
         if re.match(r'^(hi|hello|please share|check this out|good morning|forwarded as received)', s, re.I):
             continue
             
         score = 0
         s_lower = s.lower()
         
-        # Check claim indicator keywords
-        for pattern in CLAIM_INDICATORS:
+        # Check claim action indicators
+        for pattern in CLAIM_ACTION_INDICATORS:
             if re.search(pattern, s_lower):
                 score += 2
                 
@@ -154,19 +257,16 @@ def extract_key_claims(text: str) -> List[str]:
         if '"' in s or "'" in s:
             score += 1
             
-        # Penalize excessive question marks if it's purely rhetorical
-        if s.endswith("?") and not any(re.search(p, s_lower) for p in CLAIM_INDICATORS):
+        # Penalize excessive question marks if purely rhetorical
+        if s.endswith("?") and not any(re.search(p, s_lower) for p in CLAIM_ACTION_INDICATORS):
             score -= 1
             
         if score > 0 or len(raw_sentences) <= 3:
             scored_claims.append((score, s))
             
-        # Sort by claim significance
     scored_claims.sort(key=lambda x: x[0], reverse=True)
+    extracted = [claim for _, claim in scored_claims[:5]]
     
-    extracted = [claim for _, claim in scored_claims[:4]]
-    
-    # Fallback if no specific claim reached threshold
     if not extracted and clean_text:
         extracted = [clean_text[:180] + ("..." if len(clean_text) > 180 else "")]
         
