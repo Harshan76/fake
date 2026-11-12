@@ -44,6 +44,14 @@ COMMON_STOPWORDS = {
     'due', 'also', 'about', 'over', 'into', 'after', 'under', 'all', 'any'
 }
 
+GENERIC_TITLES = {
+    'prime', 'minister', 'president', 'government', 'agency', 'department',
+    'official', 'officials', 'police', 'council', 'court', 'commission',
+    'united', 'states', 'country', 'state', 'federal', 'national', 'international',
+    'declared', 'announced', 'confirmed', 'stated', 'high', 'magnitude', 'news',
+    'report', 'reported', 'month', 'year', 'week', 'today', 'yesterday', 'tomorrow'
+}
+
 def is_tavily_configured() -> bool:
     """Checks whether the Tavily Search API key is present."""
     return bool(TAVILY_API_KEY and TAVILY_API_KEY.strip())
@@ -100,11 +108,14 @@ def inspect_source_stance(source: Dict[str, Any], claim: str = "") -> str:
 
     source_tokens = extract_substantive_tokens(text_to_check)
     overlap = claim_tokens.intersection(source_tokens)
+    distinctive_overlap = overlap - GENERIC_TITLES
 
-    # To genuinely corroborate, the source must cover a substantial portion of the claim's core tokens
-    # (at least 4 distinctive tokens, OR at least 3 tokens with >= 28% overlap of the claim's key predicates)
+    # Must match substantive event predicates, not just institutional titles or country names alone
+    if len(distinctive_overlap) < 2 and len(overlap) < 4:
+        return "neutral"
+
     overlap_ratio = len(overlap) / len(claim_tokens)
-    if len(overlap) >= 4 or (len(overlap) >= 3 and overlap_ratio >= 0.28):
+    if len(distinctive_overlap) >= 3 or (len(distinctive_overlap) >= 2 and overlap_ratio >= 0.28):
         return "supports"
 
     return "neutral"

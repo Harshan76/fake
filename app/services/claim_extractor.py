@@ -17,7 +17,17 @@ COMMON_STOPWORDS = {
     "it", "its", "they", "them", "their", "we", "us", "our", "you", "your",
     "today", "yesterday", "tomorrow", "urgently", "urgent", "forward", "share",
     "official", "officially", "secretly", "reportedly", "allegedly", "according",
-    "says", "said", "also", "just", "now", "well", "very", "about"
+    "says", "said", "also", "just", "now", "well", "very", "about",
+    "will", "would", "shall", "should", "can", "could", "may", "might", "must",
+    "next", "last", "all", "any", "some", "such", "not", "into", "over", "after",
+    "before", "under", "between", "than", "more", "most", "other", "another"
+}
+
+GENERIC_TITLES = {
+    "prime", "minister", "president", "government", "agency", "department",
+    "official", "officials", "police", "council", "court", "commission",
+    "united", "states", "country", "state", "federal", "national", "international",
+    "declared", "announced", "confirmed", "stated", "high", "magnitude"
 }
 
 TOPIC_KEYWORDS = {
@@ -139,7 +149,8 @@ def extract_entities_and_statistics(text: str) -> Dict[str, List[str]]:
 def distill_claim_keywords(claim: str, max_words: int = 7) -> str:
     """
     Distills a verbose claim sentence into 4-7 salient search keywords.
-    Strips conversational noise, punctuation, and stopwords for optimal search query relevance.
+    Prioritizes entities, proper nouns, numerical values, and domain-specific predicates.
+    Demotes conversational noise, stopwords, and generic institutional titles.
     """
     if not claim:
         return ""
@@ -148,18 +159,26 @@ def distill_claim_keywords(claim: str, max_words: int = 7) -> str:
     clean = re.sub(r'\b(forwarded as received|urgent alert|breaking news|doctors stunned|secretly leaked|shocking discovery)\b', '', clean, flags=re.I)
     
     words = clean.split()
-    salient = []
+    priority_words = []
+    secondary_words = []
     
     for w in words:
-        clean_w = w.strip(".,;:?!'\"")
-        w_lower = clean_w.lower()
-        if len(clean_w) > 2 and w_lower not in COMMON_STOPWORDS:
-            salient.append(clean_w)
-            
-    if not salient:
-        return " ".join([w.strip(".,;:?!'\"") for w in words[:max_words]])
+        w_clean = w.strip('.,;:\'"?!')
+        w_lower = w_clean.lower()
+        if not w_clean or len(w_clean) < 2 or w_lower in COMMON_STOPWORDS:
+            continue
+        if re.search(r'\d', w_clean) or (w_clean[0].isupper() and w_lower not in GENERIC_TITLES):
+            if w_clean not in priority_words:
+                priority_words.append(w_clean)
+        elif w_lower not in GENERIC_TITLES:
+            if w_clean not in secondary_words:
+                secondary_words.append(w_clean)
+                
+    combined = (priority_words + secondary_words)[:max_words]
+    if not combined:
+        return " ".join([w.strip('.,;:\'"?!') for w in words[:max_words]])
         
-    return " ".join(salient[:max_words])
+    return " ".join(combined)
 
 def generate_adaptive_verification_queries(claim: str, topic: Optional[str] = None, full_text: Optional[str] = None) -> Dict[str, Any]:
     """

@@ -233,25 +233,27 @@ def find_credible_evidence(claims: List[str], full_text: str) -> Dict[str, Any]:
     Queries Wikipedia, Google News RSS, and DuckDuckGo without hardcoded hoaxes or keywords.
     Deduplicates syndicated sources and inspects source stance dynamically.
     """
+    from app.services.claim_extractor import distill_claim_keywords
     from app.services.tavily_search import inspect_source_stance
 
     all_sources = []
     supporting_evidence = []
     contradicting_evidence = []
 
-    # Dynamic query formulation
+    # Dynamic query formulation using smart entity-aware distillation
     search_queries = []
     for claim in claims[:3]:
-        clean_words = re.findall(r'\b[A-Za-z0-9]{3,}\b', claim)
-        if len(clean_words) >= 4:
-            search_queries.append(" ".join(clean_words[:7]))
+        distilled = distill_claim_keywords(claim)
+        if distilled and distilled not in search_queries:
+            search_queries.append(distilled)
 
     if not search_queries and full_text:
-        words = re.findall(r'\b[A-Za-z0-9]{3,}\b', full_text)
-        search_queries.append(" ".join(words[:6]))
+        distilled_full = distill_claim_keywords(full_text[:300])
+        if distilled_full and distilled_full not in search_queries:
+            search_queries.append(distilled_full)
 
     # Retrieve sources across open providers
-    for q in search_queries[:2]:
+    for q in search_queries[:3]:
         # 1. Wikipedia Knowledge
         for w in search_wikipedia_knowledge(q, limit=2):
             if not any(s["url"] == w["url"] for s in all_sources):
