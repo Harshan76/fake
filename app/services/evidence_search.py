@@ -70,7 +70,8 @@ def search_wikipedia_knowledge(query: str, limit: int = 3) -> List[Dict[str, Any
                     "description": sanitize_untrusted_page_text(snippet)[:300] + ("..." if len(snippet) > 300 else ""),
                     "reliability": "High",
                     "domain": "en.wikipedia.org",
-                    "source_type": "encyclopedia"
+                    "source_type": "encyclopedia",
+                    "authoritative": True
                 })
     except Exception as e:
         logger.debug(f"Wikipedia search exception for '{clean_query}': {e}")
@@ -113,7 +114,8 @@ def search_google_news_rss(query: str, limit: int = 3) -> List[Dict[str, Any]]:
                         "published_date": pub_date,
                         "reliability": "High",
                         "domain": "news.google.com",
-                        "source_type": "live_news_rss"
+                        "source_type": "live_news_rss",
+                        "authoritative": True
                     })
     except Exception as e:
         logger.debug(f"Google News RSS search exception for '{clean_query}': {e}")
@@ -157,14 +159,16 @@ def search_duckduckgo_lite(query: str, limit: int = 3) -> List[Dict[str, Any]]:
 
                     if actual_url and actual_url.startswith("http"):
                         domain = urllib.parse.urlparse(actual_url).netloc.lower()
+                        is_auth = any(auth in domain for auth in ["reuters.com", "apnews.com", "bbc.", "who.int", "nasa.gov", "thehindu.com", "nature.com"]) or domain.endswith(".gov") or domain.endswith(".edu")
                         sources.append({
                             "title": raw_title,
                             "publisher": domain.replace("www.", "").capitalize(),
                             "url": actual_url,
                             "description": sanitize_untrusted_page_text(raw_snippet)[:300],
-                            "reliability": "Moderate",
+                            "reliability": "High" if is_auth else "Moderate",
                             "domain": domain,
-                            "source_type": "web_search"
+                            "source_type": "web_search",
+                            "authoritative": is_auth
                         })
     except Exception as e:
         logger.debug(f"DuckDuckGo search exception for '{clean_query}': {e}")

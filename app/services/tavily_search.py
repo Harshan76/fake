@@ -26,10 +26,11 @@ AUTHORITATIVE_DOMAINS = {
 DEBUNK_INDICATORS = [
     r'\bfact[-\s]?check\b', r'\bdebunk(?:ed)?\b', r'\bhoax\b', r'\bfalse claim\b',
     r'\bnot true\b', r'\bno evidence\b', r'\bfabricat(?:ed|ion)\b', r'\bmisleading\b',
-    r'\bdisproven\b', r'\bbogus\b', r'\bsatire\b', r'\bfictional\b', r'\bnever (?:said|occurred|happened)\b',
+    r'\bdisproven\b', r'\bdisproved\b', r'\bbogus\b', r'\bsatire\b', r'\bfictional\b',
+    r'\brumou?r\b', r'\bnever (?:said|occurred|happened)\b',
     r'\bdid not (?:announce|say|happen)\b', r'\bdoes not exist\b', r'\bno such (?:agency|department|organization|commission)\b',
     r'\bpants on fire\b', r'\bmisattributed\b', r'\bunfounded\b', r'\bcounterfeit\b', r'\bphony\b',
-    r'\bimpossible\b', r'\buntrue\b', r'\bmyth\b', r'\bunverified\b'
+    r'\bimpossible\b', r'\buntrue\b', r'\bmyth\b', r'\bunverified\b', r'\bfake news\b'
 ]
 
 COMMON_STOPWORDS = {
@@ -81,7 +82,12 @@ def inspect_source_stance(source: Dict[str, Any], claim: str = "") -> str:
             return "contradicts"
 
     # Only authoritative sources can corroborate
-    if not source.get("authoritative", False):
+    is_auth = source.get("authoritative", False)
+    if not is_auth:
+        domain = source.get("domain") or extract_domain(source.get("url", ""))
+        if any(auth in domain for auth in AUTHORITATIVE_DOMAINS) or "wikipedia.org" in domain or domain.endswith(".gov") or domain.endswith(".edu"):
+            is_auth = True
+    if not is_auth:
         return "neutral"
 
     if not claim or not claim.strip():
@@ -96,9 +102,9 @@ def inspect_source_stance(source: Dict[str, Any], claim: str = "") -> str:
     overlap = claim_tokens.intersection(source_tokens)
 
     # To genuinely corroborate, the source must cover a substantial portion of the claim's core tokens
-    # (at least 3 distinctive tokens AND at least 35% overlap of the claim's key predicates)
+    # (at least 4 distinctive tokens, OR at least 3 tokens with >= 28% overlap of the claim's key predicates)
     overlap_ratio = len(overlap) / len(claim_tokens)
-    if len(overlap) >= 3 and overlap_ratio >= 0.35:
+    if len(overlap) >= 4 or (len(overlap) >= 3 and overlap_ratio >= 0.28):
         return "supports"
 
     return "neutral"
