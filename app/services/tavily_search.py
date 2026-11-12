@@ -37,11 +37,16 @@ COMMON_STOPWORDS = {
     'the', 'a', 'an', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for', 'with',
     'of', 'by', 'from', 'as', 'is', 'are', 'was', 'were', 'be', 'been', 'being',
     'have', 'has', 'had', 'do', 'does', 'did', 'this', 'that', 'these', 'those',
-    'it', 'its', 'they', 'them', 'their', 'we', 'us', 'our', 'you', 'your',
-    'today', 'yesterday', 'tomorrow', 'official', 'officially', 'report', 'reported',
-    'announced', 'stated', 'confirmed', 'revealed', 'news', 'according', 'scientists',
-    'experts', 'authorities', 'officials', 'team', 'study', 'new', 'recent', 'will',
-    'due', 'also', 'about', 'over', 'into', 'after', 'under', 'all', 'any'
+    'it', 'its', 'itself', 'they', 'them', 'their', 'theirs', 'themselves',
+    'he', 'him', 'his', 'himself', 'she', 'her', 'hers', 'herself',
+    'we', 'us', 'our', 'ours', 'ourselves', 'you', 'your', 'yours', 'yourself',
+    'i', 'me', 'my', 'myself', 'who', 'whom', 'whose', 'which', 'what', 'where', 'when', 'why', 'how',
+    'today', 'yesterday', 'tomorrow', 'urgently', 'urgent', 'forward', 'share',
+    'official', 'officially', 'secretly', 'reportedly', 'allegedly', 'according',
+    'says', 'said', 'also', 'just', 'now', 'well', 'very', 'about',
+    'will', 'would', 'shall', 'should', 'can', 'could', 'may', 'might', 'must',
+    'next', 'last', 'all', 'any', 'some', 'such', 'not', 'into', 'over', 'after',
+    'before', 'under', 'between', 'than', 'more', 'most', 'other', 'another', 'due'
 }
 
 GENERIC_TITLES = {
@@ -50,6 +55,15 @@ GENERIC_TITLES = {
     'united', 'states', 'country', 'state', 'federal', 'national', 'international',
     'declared', 'announced', 'confirmed', 'stated', 'high', 'magnitude', 'news',
     'report', 'reported', 'month', 'year', 'week', 'today', 'yesterday', 'tomorrow'
+}
+
+GENERIC_DOMAIN_WORDS = {
+    'football', 'cricket', 'sports', 'league', 'game', 'match', 'ball',
+    'health', 'medicine', 'hospital', 'doctor', 'patient', 'disease',
+    'space', 'science', 'nature', 'planet', 'earth', 'sun', 'moon',
+    'government', 'country', 'city', 'state', 'public', 'national', 'world',
+    'market', 'money', 'business', 'company', 'economy', 'financial',
+    'news', 'report', 'today', 'yesterday', 'tomorrow', 'year', 'month', 'week'
 }
 
 def is_tavily_configured() -> bool:
@@ -120,17 +134,20 @@ def inspect_source_stance(source: Dict[str, Any], claim: str = "") -> str:
     entity_overlap = entity_words.intersection(source_tokens)
     number_overlap = set(n for n in numbers if n.lower() in text_to_check)
 
-    # A source CANNOT corroborate an event claim if it has ZERO event predicate overlap!
+    # Core action/event predicates (excluding broad domain/topic vocabulary)
+    action_predicate_overlap = predicate_overlap - GENERIC_DOMAIN_WORDS
+
+    # A source CANNOT corroborate an event claim if it has ZERO core event action predicate overlap!
     # (e.g. A biography of Lionel Messi or Joe Biden or Canada that doesn't mention the event)
-    if predicates and len(predicate_overlap) == 0:
+    if predicates and len(action_predicate_overlap) == 0:
         return "neutral"
 
     # To genuinely corroborate, the source must cover:
-    # At least 2 event predicate tokens, OR 1 predicate token with entity confirmation and number/overall match
+    # At least 2 distinct action predicate tokens, OR 1 action predicate token with direct entity/number confirmation
     has_event_corroboration = False
-    if len(predicate_overlap) >= 2:
+    if len(action_predicate_overlap) >= 2:
         has_event_corroboration = True
-    elif len(predicate_overlap) >= 1 and (len(entity_overlap) >= 1 or len(number_overlap) >= 1):
+    elif len(action_predicate_overlap) >= 1 and (len(entity_overlap) >= 1 or len(number_overlap) >= 1):
         overall_overlap = claim_tokens.intersection(source_tokens)
         if len(overall_overlap) >= 3:
             has_event_corroboration = True

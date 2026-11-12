@@ -14,13 +14,16 @@ COMMON_STOPWORDS = {
     "a", "an", "the", "and", "or", "but", "in", "on", "at", "to", "for", "with",
     "of", "by", "from", "as", "is", "are", "was", "were", "be", "been", "being",
     "have", "has", "had", "do", "does", "did", "this", "that", "these", "those",
-    "it", "its", "they", "them", "their", "we", "us", "our", "you", "your",
+    "it", "its", "itself", "they", "them", "their", "theirs", "themselves",
+    "he", "him", "his", "himself", "she", "her", "hers", "herself",
+    "we", "us", "our", "ours", "ourselves", "you", "your", "yours", "yourself",
+    "i", "me", "my", "myself", "who", "whom", "whose", "which", "what", "where", "when", "why", "how",
     "today", "yesterday", "tomorrow", "urgently", "urgent", "forward", "share",
     "official", "officially", "secretly", "reportedly", "allegedly", "according",
     "says", "said", "also", "just", "now", "well", "very", "about",
     "will", "would", "shall", "should", "can", "could", "may", "might", "must",
     "next", "last", "all", "any", "some", "such", "not", "into", "over", "after",
-    "before", "under", "between", "than", "more", "most", "other", "another"
+    "before", "under", "between", "than", "more", "most", "other", "another", "due"
 }
 
 GENERIC_TITLES = {
