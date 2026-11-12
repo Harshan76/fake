@@ -76,13 +76,15 @@ def inspect_source_stance(source: Dict[str, Any], claim: str = "") -> str:
     """
     Evaluates whether a retrieved web source is directly contradicting/debunking a claim,
     supporting it with authoritative corroboration of the specific material assertions, or neutral.
-    General background articles that merely share broad keywords (e.g. 'Moon' or 'NASA')
+    General background articles that merely share broad keywords (e.g. 'Moon' or 'NASA' or a politician's bio)
     without confirming the claim's core event are classified as neutral.
     """
+    from app.services.claim_extractor import extract_claim_predicates
+
     text_to_check = f"{source.get('title', '')} {source.get('description', '')}".lower()
     raw_content = source.get("raw_content", "")
     if raw_content:
-        text_to_check += " " + raw_content[:1000].lower()
+        text_to_check += " " + raw_content[:1500].lower()
     
     # 1. Check for explicit debunk / refutation markers
     for pattern in DEBUNK_INDICATORS:
@@ -101,21 +103,39 @@ def inspect_source_stance(source: Dict[str, Any], claim: str = "") -> str:
     if not claim or not claim.strip():
         return "neutral"
 
-    # 2. Extract substantive content tokens from claim and source
+    # 2. Deconstruct claim into entities (WHO) and event predicates (WHAT)
+    deconstructed = extract_claim_predicates(claim)
+    predicates = deconstructed.get("predicates", set())
+    entity_words = deconstructed.get("entity_words", set())
+    numbers = deconstructed.get("numbers", set())
+
+    source_tokens = extract_substantive_tokens(text_to_check)
     claim_tokens = extract_substantive_tokens(claim)
+
     if not claim_tokens:
         return "neutral"
 
-    source_tokens = extract_substantive_tokens(text_to_check)
-    overlap = claim_tokens.intersection(source_tokens)
-    distinctive_overlap = overlap - GENERIC_TITLES
+    # Predicate overlap: does the source corroborate WHAT happened?
+    predicate_overlap = predicates.intersection(source_tokens)
+    entity_overlap = entity_words.intersection(source_tokens)
+    number_overlap = set(n for n in numbers if n.lower() in text_to_check)
 
-    # Must match substantive event predicates, not just institutional titles or country names alone
-    if len(distinctive_overlap) < 2 and len(overlap) < 4:
+    # A source CANNOT corroborate an event claim if it has ZERO event predicate overlap!
+    # (e.g. A biography of Lionel Messi or Joe Biden or Canada that doesn't mention the event)
+    if predicates and len(predicate_overlap) == 0:
         return "neutral"
 
-    overlap_ratio = len(overlap) / len(claim_tokens)
-    if len(distinctive_overlap) >= 3 or (len(distinctive_overlap) >= 2 and overlap_ratio >= 0.28):
+    # To genuinely corroborate, the source must cover:
+    # At least 2 event predicate tokens, OR 1 predicate token with entity confirmation and number/overall match
+    has_event_corroboration = False
+    if len(predicate_overlap) >= 2:
+        has_event_corroboration = True
+    elif len(predicate_overlap) >= 1 and (len(entity_overlap) >= 1 or len(number_overlap) >= 1):
+        overall_overlap = claim_tokens.intersection(source_tokens)
+        if len(overall_overlap) >= 3:
+            has_event_corroboration = True
+
+    if has_event_corroboration:
         return "supports"
 
     return "neutral"

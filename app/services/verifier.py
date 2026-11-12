@@ -95,30 +95,46 @@ def verify_news_content(text: str, input_type: str = "text", original_url: str =
     logger.info(f"Extracted {len(identified_claims)} claims (Topic: {detected_topic}): {[c[:60] for c in identified_claims]}")
 
     # Step 2: Query Google Fact Check Tools API
-    fact_check_data = search_claims_fact_checks(identified_claims)
-    fact_check_reviews = fact_check_data.get("reviews", [])
-    fact_check_contradicting = fact_check_data.get("contradicting", [])
-    fact_check_supporting = fact_check_data.get("supporting", [])
-    logger.info(f"Fact Check API returned {len(fact_check_reviews)} reviews ({len(fact_check_contradicting)} contradicting, {len(fact_check_supporting)} supporting).")
+    fact_check_reviews = []
+    fact_check_contradicting = []
+    fact_check_supporting = []
+    try:
+        fact_check_data = search_claims_fact_checks(identified_claims)
+        fact_check_reviews = fact_check_data.get("reviews", [])
+        fact_check_contradicting = fact_check_data.get("contradicting", [])
+        fact_check_supporting = fact_check_data.get("supporting", [])
+        logger.info(f"Fact Check API returned {len(fact_check_reviews)} reviews ({len(fact_check_contradicting)} contradicting, {len(fact_check_supporting)} supporting).")
+    except Exception as e:
+        logger.warning(f"Fact check search encountered an error: {e}")
 
     # Step 3: Query Tavily Live Web Search API with Topic-Adaptive Queries
-    tavily_data = search_claims_evidence(identified_claims, full_text=clean_text)
-    tavily_sources = tavily_data.get("sources", [])
-    tavily_contradicting = tavily_data.get("contradicting", [])
-    tavily_supporting = tavily_data.get("supporting", [])
-    attribution_findings = tavily_data.get("attribution_findings", [])
-    logger.info(f"Tavily Search returned {len(tavily_sources)} sources ({len(tavily_contradicting)} contradicting, {len(tavily_supporting)} supporting).")
+    tavily_sources = []
+    tavily_contradicting = []
+    tavily_supporting = []
+    attribution_findings = []
+    try:
+        tavily_data = search_claims_evidence(identified_claims, full_text=clean_text)
+        tavily_sources = tavily_data.get("sources", [])
+        tavily_contradicting = tavily_data.get("contradicting", [])
+        tavily_supporting = tavily_data.get("supporting", [])
+        attribution_findings = tavily_data.get("attribution_findings", [])
+        logger.info(f"Tavily Search returned {len(tavily_sources)} sources ({len(tavily_contradicting)} contradicting, {len(tavily_supporting)} supporting).")
+    except Exception as e:
+        logger.warning(f"Tavily search encountered an error: {e}")
 
     # Step 4: Multi-Track Open Evidence Fallback (Wikipedia, Google News RSS, DuckDuckGo)
     open_sources = []
     open_supporting = []
     open_contradicting = []
     if len(tavily_sources) == 0:
-        free_data = find_credible_evidence(identified_claims, clean_text)
-        open_sources = free_data.get("sources", [])
-        open_supporting = free_data.get("supporting_evidence", [])
-        open_contradicting = free_data.get("contradicting_evidence", [])
-        logger.info(f"Open Fallback search returned {len(open_sources)} sources ({len(open_contradicting)} contradicting, {len(open_supporting)} supporting).")
+        try:
+            free_data = find_credible_evidence(identified_claims, clean_text)
+            open_sources = free_data.get("sources", [])
+            open_supporting = free_data.get("supporting_evidence", [])
+            open_contradicting = free_data.get("contradicting_evidence", [])
+            logger.info(f"Open Fallback search returned {len(open_sources)} sources ({len(open_contradicting)} contradicting, {len(open_supporting)} supporting).")
+        except Exception as e:
+            logger.warning(f"Open fallback search encountered an error: {e}")
 
     # Step 5: Execute ML Stylometric Analysis (Auxiliary indicator only)
     ml_result = predict_text_credibility(clean_text)
@@ -164,14 +180,21 @@ def verify_news_content(text: str, input_type: str = "text", original_url: str =
     deduped_sources = deduplicate_syndicated_sources(all_sources)
 
     # Step 7: Synthesize Evidence via Groq LLM (or deterministic rule engine)
-    synthesis = synthesize_evidence_with_groq(
-        article_text=clean_text,
-        claims=identified_claims,
-        fact_check_reviews=fact_check_reviews,
-        tavily_sources=deduped_sources,
-        ml_stylometrics=ml_result,
-        attribution_findings=attribution_findings
-    )
+    try:
+        synthesis = synthesize_evidence_with_groq(
+            article_text=clean_text,
+            claims=identified_claims,
+            fact_check_reviews=fact_check_reviews,
+            tavily_sources=deduped_sources,
+            ml_stylometrics=ml_result,
+            attribution_findings=attribution_findings
+        )
+    except Exception as e:
+        logger.warning(f"Groq synthesis encountered exception ({e}); running deterministic fallback.")
+        from app.services.groq_verifier import deterministic_evidence_synthesis
+        synthesis = deterministic_evidence_synthesis(
+            clean_text, identified_claims, fact_check_reviews, deduped_sources, ml_result, attribution_findings
+        )
 
     verdict = synthesis.get("verdict", "INSUFFICIENT EVIDENCE")
     confidence_score = float(synthesis.get("confidence_score", 50.0))
@@ -251,26 +274,22 @@ def verify_news_content(text: str, input_type: str = "text", original_url: str =
         )
 
     # Priority 3: Direct External Corroboration from Authoritative Sources (REAL)
-    elif len(supporting_evidence) >= 1 or (verdict == "REAL" and len(deduped_sources) >= 1 and real_prob >= 55.0):
+    # Requires genuine corroborating sources addressing the specific material claim, and NO contradictions
+    elif len(supporting_evidence) >= 1 and not contradicting_evidence:
         verdict = "REAL"
-        confidence_score = max(confidence_score, 80.0, min(real_prob, 92.0))
-        if supporting_evidence:
-            source_name = supporting_evidence[0].get("source", "Authoritative Source")
-        elif deduped_sources:
-            source_name = deduped_sources[0].get("publisher", "Authoritative Source")
-        else:
-            source_name = "Authoritative Source"
+        confidence_score = max(confidence_score, 80.0, min(evidence_score, 92.0))
+        source_name = supporting_evidence[0].get("source", "Authoritative Source")
         explanation = (
             f"Factual assertions are corroborated by published reports and official records from {source_name}. "
             "No credible refutations or active hoax alerts were detected."
         )
 
-    # Priority 4: Synthesis Engine (Groq) explicit verdict
-    elif verdict in ["REAL", "FAKE"] and synthesis.get("reasoning_engine", "").startswith("Groq"):
-        # Groq evaluated evidence / plausibility
-        pass
+    # Priority 4: Synthesis Engine (Groq) explicit verdict - ONLY honored if supported by evidence
+    elif verdict == "REAL" and synthesis.get("reasoning_engine", "").startswith("Groq") and len(supporting_evidence) >= 1:
+        verdict = "REAL"
+        confidence_score = max(confidence_score, 80.0)
 
-    # Priority 5: Unverified / Insufficient Evidence
+    # Priority 5: Unverified / Insufficient Evidence (Default for anything lacking conclusive evidence)
     else:
         verdict = "INSUFFICIENT EVIDENCE"
         confidence_score = 50.0

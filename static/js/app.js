@@ -703,9 +703,10 @@ class TruthLensApp {
         const row = document.createElement("div");
         row.className = "history-item-row";
 
-        let badgeClass = "tag-real";
-        if (rec.classification === "FAKE") badgeClass = "tag-fake";
-        if (rec.classification === "UNABLE TO VERIFY") badgeClass = "tag-unverified";
+        let badgeClass = "tag-unverified";
+        if (rec.classification === "REAL") badgeClass = "tag-real";
+        else if (rec.classification === "FAKE") badgeClass = "tag-fake";
+        else badgeClass = "tag-unverified";
 
         const dateStr = rec.timestamp ? new Date(rec.timestamp).toLocaleDateString() : "Recent";
         const contentSnippet = rec.submitted_content.slice(0, 110) + (rec.submitted_content.length > 110 ? "..." : "");

@@ -146,6 +146,41 @@ def extract_entities_and_statistics(text: str) -> Dict[str, List[str]]:
         "attributions": attributions
     }
 
+def extract_claim_predicates(claim: str) -> Dict[str, Any]:
+    """
+    Deconstructs a factual claim into:
+    1. Entities & Subjects (WHO/WHERE): people, nations, agencies, proper nouns.
+    2. Action / Event Predicates (WHAT): verbs, actions, outcomes, metrics, occurrences.
+    Ensures that external evidence is evaluated against the actual event asserted,
+    rather than mere presence of the subject entity.
+    """
+    if not claim:
+        return {"entities": set(), "entity_words": set(), "predicates": set(), "numbers": set()}
+
+    entities_data = extract_entities_and_statistics(claim)
+    named_entities = set(e.lower() for e in entities_data.get("entities", []))
+    numbers = set(entities_data.get("numbers", []))
+
+    clean = re.sub(r'[^a-zA-Z0-9\s]', ' ', claim.lower())
+    words = clean.split()
+
+    entity_words = set()
+    for ne in named_entities:
+        for w in ne.split():
+            entity_words.add(w)
+
+    predicate_words = set()
+    for w in words:
+        if len(w) > 2 and w not in COMMON_STOPWORDS and w not in GENERIC_TITLES and w not in entity_words:
+            predicate_words.add(w)
+
+    return {
+        "entities": named_entities,
+        "entity_words": entity_words,
+        "predicates": predicate_words,
+        "numbers": numbers
+    }
+
 def distill_claim_keywords(claim: str, max_words: int = 7) -> str:
     """
     Distills a verbose claim sentence into 4-7 salient search keywords.
