@@ -63,7 +63,12 @@ GENERIC_DOMAIN_WORDS = {
     'space', 'science', 'nature', 'planet', 'earth', 'sun', 'moon',
     'government', 'country', 'city', 'state', 'public', 'national', 'world',
     'market', 'money', 'business', 'company', 'economy', 'financial',
-    'news', 'report', 'today', 'yesterday', 'tomorrow', 'year', 'month', 'week'
+    'news', 'report', 'today', 'yesterday', 'tomorrow', 'year', 'month', 'week',
+    'viral', 'social', 'media', 'claim', 'claims', 'post', 'posts', 'online',
+    'scientist', 'scientists', 'expert', 'experts', 'official', 'officials',
+    'rumor', 'rumours', 'rumour', 'video', 'videos', 'photo', 'photos',
+    'say', 'says', 'said', 'state', 'states', 'stated', 'confirm', 'confirms',
+    'confirmed', 'warn', 'warns', 'warned', 'announce', 'announces', 'announced'
 }
 
 def is_tavily_configured() -> bool:

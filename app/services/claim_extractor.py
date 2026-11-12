@@ -33,6 +33,19 @@ GENERIC_TITLES = {
     "declared", "announced", "confirmed", "stated", "high", "magnitude"
 }
 
+META_AND_ATTRIBUTION_WORDS = {
+    "viral", "social", "media", "claim", "claims", "claiming", "claimed",
+    "post", "posts", "posting", "posted", "online", "internet", "video", "videos",
+    "photo", "photos", "image", "images", "rumor", "rumours", "rumour",
+    "scientist", "scientists", "expert", "experts", "official", "officials",
+    "spokesman", "spokesperson", "spokespersons", "authorities", "people",
+    "user", "users", "netizen", "netizens", "source", "sources", "news", "report",
+    "reported", "reports", "reporting", "article", "articles", "headline", "headlines",
+    "say", "says", "saying", "said", "state", "states", "stated", "stating",
+    "confirm", "confirms", "confirmed", "confirming", "warn", "warns", "warned", "warning",
+    "announce", "announces", "announced", "announcing", "declare", "declares", "declared"
+}
+
 TOPIC_KEYWORDS = {
     "health": [
         "disease", "cure", "vaccine", "health", "hospital", "doctor", "virus",
@@ -138,8 +151,8 @@ def extract_entities_and_statistics(text: str) -> Dict[str, List[str]]:
 
     numbers = re.findall(r'\b\d+(?:,\d+)*(?:\.\d+)?%?\b|\$\d+(?:,\d+)*(?:\.\d+)?', text)
     dates = re.findall(r'\b(?:19|20)\d{2}\b|\b(?:January|February|March|April|May|June|July|August|September|October|November|December)\s+\d{1,2}(?:,\s+\d{4})?\b', text, re.IGNORECASE)
-    proper_nouns = re.findall(r'\b[A-Z][a-z]+(?:\s+[A-Z][a-z]+)*\b', text)
-    filtered_nouns = [pn for pn in proper_nouns if len(pn) > 3 and pn.lower() not in COMMON_STOPWORDS][:6]
+    proper_nouns = re.findall(r'\b[A-Z]{2,}\b|\b[A-Z][a-z]+(?:\s+[A-Z][a-z]+)*\b', text)
+    filtered_nouns = [pn for pn in proper_nouns if len(pn) >= 2 and pn.lower() not in COMMON_STOPWORDS and pn.lower() not in META_AND_ATTRIBUTION_WORDS][:8]
     attributions = extract_named_attributions(text)
 
     return {
@@ -174,7 +187,7 @@ def extract_claim_predicates(claim: str) -> Dict[str, Any]:
 
     predicate_words = set()
     for w in words:
-        if len(w) > 2 and w not in COMMON_STOPWORDS and w not in GENERIC_TITLES and w not in entity_words:
+        if len(w) > 2 and w not in COMMON_STOPWORDS and w not in GENERIC_TITLES and w not in META_AND_ATTRIBUTION_WORDS and w not in entity_words:
             predicate_words.add(w)
 
     return {
