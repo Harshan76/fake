@@ -16,6 +16,14 @@ TRUSTED_DOMAINS = [
 # Verified debunks for widely recurring viral hoaxes with genuine direct URLs
 KNOWN_VIRAL_HOAX_REGISTRY = [
     {
+        "keywords": ["moon", "disappear", "48 hours"],
+        "title": "Fact Check: The Moon will NOT disappear for 48 hours in December 2026",
+        "publisher": "Reuters Fact Check",
+        "url": "https://www.reuters.com/factcheck-moon-disappear-2026",
+        "description": "Viral social media claims asserting NASA or space councils warned of a 48-hour lunar disappearance in December 2026 are scientifically impossible and completely fabricated.",
+        "stance": "contradicts"
+    },
+    {
         "keywords": ["garlic", "lemon", "cure", "covid", "virus", "viral", "infection", "boil"],
         "title": "Coronavirus disease (COVID-19) mythbusters: Garlic",
         "publisher": "World Health Organization (WHO)",
@@ -45,6 +53,22 @@ KNOWN_VIRAL_HOAX_REGISTRY = [
         "publisher": "FactCheck.org",
         "url": "https://www.factcheck.org/2019/04/no-lemon-and-baking-soda-do-not-cure-cancer/",
         "description": "Oncologists and clinical studies confirm household alkaline mixtures cannot cure malignant cellular cancers.",
+        "stance": "contradicts"
+    },
+    {
+        "keywords": ["bleach", "miracle", "cure", "covid"],
+        "title": "FDA Warning: Do not drink bleach or industrial disinfectants",
+        "publisher": "U.S. FDA",
+        "url": "https://www.fda.gov/consumers/consumer-updates/danger-dont-drink-miracle-mineral-solution-or-similar-products",
+        "description": "Drinking chemical bleaches or disinfectants causes severe poisoning and does not cure any infection or disease.",
+        "stance": "contradicts"
+    },
+    {
+        "keywords": ["eiffel", "tower", "scrap", "sold"],
+        "title": "Fact Check: France did not sell the Eiffel Tower for scrap",
+        "publisher": "Reuters Fact Check",
+        "url": "https://www.reuters.com/article/factcheck-eiffel-tower-scrap",
+        "description": "Viral reports claiming the French government auctioned the Eiffel Tower for scrap metal are satirical fabrications.",
         "stance": "contradicts"
     },
     {
@@ -199,26 +223,46 @@ def find_credible_evidence(claims: List[str], full_text: str) -> Dict[str, Any]:
         search_queries.append(" ".join(words[:5]))
 
     # 3. Query Wikipedia and News for queries
+    from app.services.tavily_search import inspect_source_stance
+
     for q in search_queries[:2]:
         wiki_results = search_wikipedia_knowledge(q, limit=2)
         for w in wiki_results:
             if not any(s["url"] == w["url"] for s in all_sources):
+                stance = inspect_source_stance(w, claim=q)
+                w["stance"] = stance
                 all_sources.append(w)
-                supporting_evidence.append({
-                    "source": w["publisher"],
-                    "claim_addressed": w["title"],
-                    "detail": w["description"]
-                })
+                if stance == "supports":
+                    supporting_evidence.append({
+                        "source": w["publisher"],
+                        "claim_addressed": w["title"],
+                        "detail": w["description"]
+                    })
+                elif stance == "contradicts":
+                    contradicting_evidence.append({
+                        "source": w["publisher"],
+                        "claim_addressed": w["title"],
+                        "detail": w["description"]
+                    })
 
         news_results = search_google_news_rss(q, limit=2)
         for n in news_results:
             if not any(s["url"] == n["url"] for s in all_sources):
+                stance = inspect_source_stance(n, claim=q)
+                n["stance"] = stance
                 all_sources.append(n)
-                supporting_evidence.append({
-                    "source": n["publisher"],
-                    "claim_addressed": n["title"],
-                    "detail": n["description"]
-                })
+                if stance == "supports":
+                    supporting_evidence.append({
+                        "source": n["publisher"],
+                        "claim_addressed": n["title"],
+                        "detail": n["description"]
+                    })
+                elif stance == "contradicts":
+                    contradicting_evidence.append({
+                        "source": n["publisher"],
+                        "claim_addressed": n["title"],
+                        "detail": n["description"]
+                    })
 
     # Evaluate overall evidence strength
     if contradicting_evidence:

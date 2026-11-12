@@ -157,6 +157,20 @@ def verify_news_content(text: str, input_type: str = "text", original_url: str =
             seen_urls.add(url)
             all_sources.append(s)
 
+    # Priority 4: Free Open Knowledge & News Search Fallback (if no paid API sources returned)
+    if len(all_sources) == 0:
+        from app.services.evidence_search import find_credible_evidence
+        free_data = find_credible_evidence(identified_claims, clean_text)
+        for s in free_data.get("sources", []):
+            url = s.get("url", "#")
+            if url and url not in seen_urls:
+                seen_urls.add(url)
+                all_sources.append(s)
+        for sup in free_data.get("supporting_evidence", []):
+            supporting_evidence.append(sup)
+        for con in free_data.get("contradicting_evidence", []):
+            contradicting_evidence.append(con)
+
     # Step 7: Synthesize Evidence via Groq (or deterministic rule engine)
     synthesis = synthesize_evidence_with_groq(
         article_text=clean_text,
@@ -209,26 +223,20 @@ def verify_news_content(text: str, input_type: str = "text", original_url: str =
     elif all_sources:
         evidence_score = 55.0
 
-    # Step 9: Final Quality & Strict Evidence-Based Policy Assurance
-    # Policy 1: REAL requires sufficient reliable supporting evidence directly confirming the claim.
-    # Under NO circumstances can a claim be declared REAL without at least 2 credible supporting evidence items
-    # (or 1 verified primary institutional record) that directly corroborate the specific material assertions.
-    if verdict == "REAL":
-        if len(supporting_evidence) < 2:
-            verdict = "INSUFFICIENT EVIDENCE"
-            confidence_score = 50.0
-            explanation = (
-                "While the submitted content may be written in a formal or journalistic tone, TruthLens could not find "
-                "sufficient independent primary source corroboration directly confirming these material claims on the live web. "
-                "Under strict verification rules, uncorroborated assertions cannot be declared REAL without evidence."
-            )
-
-    # Policy 2: Credible contradictory evidence yields FAKE unless evidence is genuinely conflicting
+    # Step 9: Final Quality & Accurate Verdict Aggregation
     is_conflicting = bool(
         contradicting_evidence and supporting_evidence and
         len(supporting_evidence) >= 2 and len(contradicting_evidence) >= 1
     )
 
+    fake_prob = float(ml_result.get("fake_probability", 50.0))
+    real_prob = float(ml_result.get("real_probability", 50.0))
+    ml_label = ml_result.get("predicted_label", "UNABLE TO VERIFY")
+    markers = ml_result.get("linguistic_markers", {})
+    sensational = markers.get("sensational_score", 0.0)
+    exclamations = markers.get("exclamations_per_100w", 0.0)
+
+    # Priority 1: Conflicting evidence from credible sources
     if is_conflicting:
         verdict = "INSUFFICIENT EVIDENCE"
         confidence_score = 50.0
@@ -237,35 +245,59 @@ def verify_news_content(text: str, input_type: str = "text", original_url: str =
             "independent investigations or fact checks raise substantial contradictions. Under strict verification standards, "
             "the claim is classified as INSUFFICIENT EVIDENCE pending decisive consensus."
         )
-    elif contradicting_evidence and verdict != "FAKE":
+
+    # Priority 2: Direct Contradiction / Documented Fact-Check Refutation / Viral Hoax
+    elif contradicting_evidence or registry_contradicting:
         verdict = "FAKE"
-        confidence_score = max(confidence_score, 88.0)
-        source_name = contradicting_evidence[0].get("source", "Accredited Fact Checker")
+        confidence_score = max(confidence_score, 88.0, min(fake_prob, 94.0))
+        source_name = contradicting_evidence[0].get("source", "Accredited Fact Checker") if contradicting_evidence else (registry_contradicting[0].get("source") if registry_contradicting else "Fact Check")
         explanation = (
             f"Credible external evidence directly contradicts the material claims. "
             f"Fact-checking records from {source_name} confirm the assertions are fabricated, disproven, or misleading."
         )
 
-    # Policy 3: Never classify as FAKE without evidence or contradiction
-    if verdict == "FAKE":
-        if len(contradicting_evidence) == 0 and not hoax_matches:
-            # Check if any claim analysis identified a contradiction
-            contradicted_claims = [ca for ca in claim_analyses if ca.get("status") == "CONTRADICTED"]
-            if contradicted_claims:
-                for ca in contradicted_claims:
-                    src = ca.get("sources_used", ["External Reference"])[0] if ca.get("sources_used") else "Fact Check"
-                    contradicting_evidence.append({
-                        "source": src,
-                        "claim_addressed": ca.get("claim", identified_claims[0] if identified_claims else "Primary Claim"),
-                        "detail": ca.get("finding", "Claim contradicts verified external records.")
-                    })
-            else:
-                verdict = "INSUFFICIENT EVIDENCE"
-                confidence_score = 50.0
-                explanation = (
-                    "While the text exhibits questionable indicators or lacks corroboration, no credible external evidence "
-                    "directly contradicts the material claims. Classified as INSUFFICIENT EVIDENCE rather than assuming falsehood without factual refutation."
-                )
+    # Priority 3: Direct External Corroboration from Authoritative Sources
+    elif len(supporting_evidence) >= 1 or (verdict == "REAL" and len(all_sources) >= 1 and real_prob >= 55.0):
+        verdict = "REAL"
+        confidence_score = max(confidence_score, 80.0, min(real_prob, 92.0))
+        if supporting_evidence:
+            source_name = supporting_evidence[0].get("source", "Authoritative Source")
+        elif all_sources:
+            source_name = all_sources[0].get("publisher", "Authoritative Source")
+        else:
+            source_name = "Authoritative Source"
+        explanation = (
+            f"Factual assertions are corroborated by published reports and official records from {source_name}. "
+            "No credible refutations or active hoax alerts were detected."
+        )
+
+    # Priority 4: Synthesis engine (Groq) delivered an explicit verdict
+    elif verdict in ["REAL", "FAKE"] and synthesis.get("reasoning_engine", "").startswith("Groq"):
+        # Groq evaluated evidence / plausibility
+        pass
+
+    # Priority 5: Evaluate Algorithmic & Linguistic Credibility Indicators
+    else:
+        # Check for strong signals of fabrication (high fake probability with alarmism, sensationalism, or emergency claims)
+        has_sensationalism = (
+            sensational >= 1.0 or exclamations >= 1.0 or markers.get("caps_ratio", 0) >= 10.0 or
+            any(w in clean_text.lower() for w in ["shocking", "secret", "miracle", "cure", "alert", "doors", "emergency", "hoax", "conspiracy"])
+        )
+        if fake_prob >= 80.0 and has_sensationalism:
+            verdict = "FAKE"
+            confidence_score = min(max(fake_prob, 75.0), 93.0)
+            summary = f"TruthLens analysis identified strong indicators of misinformation and fabricated claims ({round(confidence_score, 1)}% risk)."
+            explanation = (
+                f"TruthLens algorithmic and stylometric analysis identified strong indicators of misinformation and fabricated claims ({round(fake_prob, 1)}% probability). "
+                "The content exhibits sensationalized framing, emergency panic rhetoric, or abnormal attribution patterns that lack corroboration."
+            )
+        else:
+            verdict = "INSUFFICIENT EVIDENCE"
+            confidence_score = 50.0
+            explanation = (
+                "TruthLens could not locate decisive corroborating primary sources or established fact-check reviews for this text. "
+                "In accordance with responsible verification standards, uncorroborated news is classified as INSUFFICIENT EVIDENCE rather than assumed true or false."
+            )
 
     # Policy 4: Attribution check without false equivalence
     if attribution_findings and verdict == "INSUFFICIENT EVIDENCE":

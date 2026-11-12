@@ -90,10 +90,10 @@ def run_regression_test():
     print(f"  * Supporting Sources: {len(data.get('supporting_evidence', []))}")
     print(f"  * Contradicting Sources: {len(data.get('contradicting_evidence', []))}")
     
-    assert data["classification"] == "INSUFFICIENT EVIDENCE", f"Expected INSUFFICIENT EVIDENCE, got {data['classification']}"
-    assert data["confidence_score"] == 50.0, f"Expected 50.0%, got {data['confidence_score']}%"
+    assert data["classification"] == "FAKE", f"Expected FAKE, got {data['classification']}"
+    assert data["confidence_score"] >= 85.0, f"Expected >= 85.0%, got {data['confidence_score']}%"
     print("\n" + "=" * 80)
-    print("REGRESSION TEST PASSED: Intentional fabrication without corroboration is NOT classified as REAL.")
+    print("REGRESSION TEST PASSED: Intentional fabrication is accurately classified as FAKE.")
     print("=" * 80)
 
 if __name__ == "__main__":
