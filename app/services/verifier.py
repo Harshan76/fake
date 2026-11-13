@@ -61,22 +61,32 @@ def verify_news_content(text: str, input_type: str = "text", original_url: str =
     clean_text = text.strip() if text else ""
     capabilities = get_provider_capabilities()
 
-    # Guardrail: Content too brief to extract claims
-    if len(clean_text) < 15:
+    # Guardrail: Content too brief or unreadable to extract claims
+    words = clean_text.split()
+    if len(clean_text) < 20 or len(words) < 4:
+        is_img = (input_type == "image")
+        summary_msg = "The screenshot text is incomplete or unreadable." if is_img else "The submitted content is too brief to extract verifiable claims."
+        expl_msg = (
+            "The screenshot text is incomplete, unreadable, or below the analytical threshold. "
+            "Please ensure the image contains a clear headline and article body, or type the news text manually to verify."
+            if is_img else
+            "TruthLens requires sufficient factual context (minimum 20 characters and complete sentence structure) "
+            "to extract and cross-reference claims against external evidence."
+        )
         return {
             "classification": "INSUFFICIENT EVIDENCE",
-            "confidence_score": 45.0,
+            "confidence_score": 50.0,
             "ml_confidence": 0.0,
             "evidence_score": 0.0,
-            "summary": "The submitted content is too brief to extract verifiable claims.",
-            "explanation": "TruthLens requires sufficient factual context (minimum 15 characters or a complete sentence) to extract and cross-reference claims against external evidence.",
+            "summary": summary_msg,
+            "explanation": expl_msg,
             "identified_claims": [],
             "claim_analyses": [],
             "supporting_evidence": [],
             "contradicting_evidence": [],
             "sources": [],
             "service_status": capabilities,
-            "limitations": ["Input text below minimum analytical threshold."],
+            "limitations": ["Input text below minimum analytical threshold for claim verification."],
             "ml_prediction": None,
             "status": "COMPLETED"
         }
@@ -122,17 +132,17 @@ def verify_news_content(text: str, input_type: str = "text", original_url: str =
     except Exception as e:
         logger.warning(f"Tavily search encountered an error: {e}")
 
-    # Step 4: Multi-Track Open Evidence Fallback (Wikipedia, Google News RSS, DuckDuckGo)
+    # Step 4: Multi-Track Open Evidence Retrieval (Wikipedia, Google News RSS, DuckDuckGo)
     open_sources = []
     open_supporting = []
     open_contradicting = []
-    if len(tavily_sources) == 0:
+    if len(tavily_supporting) == 0 and len(tavily_contradicting) == 0:
         try:
             free_data = find_credible_evidence(identified_claims, clean_text)
             open_sources = free_data.get("sources", [])
             open_supporting = free_data.get("supporting_evidence", [])
             open_contradicting = free_data.get("contradicting_evidence", [])
-            logger.info(f"Open Fallback search returned {len(open_sources)} sources ({len(open_contradicting)} contradicting, {len(open_supporting)} supporting).")
+            logger.info(f"Open search returned {len(open_sources)} sources ({len(open_contradicting)} contradicting, {len(open_supporting)} supporting).")
         except Exception as e:
             logger.warning(f"Open fallback search encountered an error: {e}")
 
@@ -272,6 +282,8 @@ def verify_news_content(text: str, input_type: str = "text", original_url: str =
             f"Credible external evidence directly contradicts the material claims. "
             f"Fact-checking records and investigative reports from {source_name} confirm the assertions are fabricated, disproven, or misleading."
         )
+        if sensational >= 2.0 or fake_prob >= 70.0:
+            explanation += f" Auxiliary ML stylometric analysis also detected linguistic markers typical of sensationalized claims ({fake_prob:.1f}% fake probability)."
 
     # Priority 3: Direct External Corroboration from Authoritative Sources (REAL)
     # Requires genuine corroborating sources addressing the specific material claim, and NO contradictions
@@ -283,6 +295,8 @@ def verify_news_content(text: str, input_type: str = "text", original_url: str =
             f"Factual assertions are corroborated by published reports and official records from {source_name}. "
             "No credible refutations or active hoax alerts were detected."
         )
+        if real_prob >= 60.0:
+            explanation += f" Auxiliary ML stylometric analysis also confirms journalistic linguistic phrasing ({real_prob:.1f}% credibility index)."
 
     # Priority 4: Synthesis Engine (Groq) explicit verdict - ONLY honored if supported by evidence
     elif verdict == "REAL" and synthesis.get("reasoning_engine", "").startswith("Groq") and len(supporting_evidence) >= 1:
@@ -293,8 +307,11 @@ def verify_news_content(text: str, input_type: str = "text", original_url: str =
     else:
         verdict = "INSUFFICIENT EVIDENCE"
         confidence_score = 50.0
+        ml_summary_prob = round(real_prob if ml_label == "REAL" else fake_prob, 1)
         explanation = (
             "TruthLens could not locate decisive corroborating primary sources or established fact-check reviews for this text. "
+            f"While auxiliary ML stylometrics indicate {ml_label.lower()} textual characteristics ({ml_summary_prob}% probability), "
+            "independent external factual corroboration could not be established. "
             "In accordance with responsible verification standards, uncorroborated news is classified as INSUFFICIENT EVIDENCE rather than assumed true or false."
         )
 

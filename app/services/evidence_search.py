@@ -81,8 +81,11 @@ def search_wikipedia_knowledge(query: str, limit: int = 3) -> List[Dict[str, Any
 def search_google_news_rss(query: str, limit: int = 3) -> List[Dict[str, Any]]:
     """
     Universal live news retrieval: queries Google News RSS for published journalistic reporting.
+    Uses complete meaningful factual queries and parses full title, publisher, and summary descriptions.
     Requires no API key.
     """
+    import xml.etree.ElementTree as ET
+
     sources = []
     clean_query = query.strip()
     if not clean_query:
@@ -93,30 +96,84 @@ def search_google_news_rss(query: str, limit: int = 3) -> List[Dict[str, Any]]:
         rss_url = f"https://news.google.com/rss/search?q={encoded_query}&hl=en-US&gl=US&ceid=US:en"
         headers = {"User-Agent": USER_AGENT}
         res = requests.get(rss_url, headers=headers, timeout=3.5)
-        if res.status_code == 200:
-            soup = BeautifulSoup(res.content, "xml")
-            items = soup.find_all("item")[:limit]
+        if res.status_code == 200 and res.content:
+            items = []
+            try:
+                root = ET.fromstring(res.content)
+                items = root.findall(".//item")[:limit]
+            except Exception:
+                soup = BeautifulSoup(res.content, "html.parser")
+                items = soup.find_all("item")[:limit]
+
             for item in items:
-                title = item.find("title").get_text(strip=True) if item.find("title") else "News Report"
-                link_tag = item.find("link")
-                link = link_tag.get_text(strip=True) if link_tag else ""
-                source_tag = item.find("source")
-                publisher = source_tag.get_text(strip=True) if source_tag else "Verified News Publisher"
-                pub_date_tag = item.find("pubDate")
-                pub_date = pub_date_tag.get_text(strip=True) if pub_date_tag else None
-                
-                if link:
-                    sources.append({
-                        "title": title,
-                        "publisher": publisher,
-                        "url": link,
-                        "description": f"Published coverage and reporting by {publisher} ({pub_date[:16] if pub_date else 'Recent'}).",
-                        "published_date": pub_date,
-                        "reliability": "High",
-                        "domain": "news.google.com",
-                        "source_type": "live_news_rss",
-                        "authoritative": True
-                    })
+                if hasattr(item, "find"):
+                    if isinstance(item, ET.Element):
+                        t_node = item.find("title")
+                        title = t_node.text.strip() if t_node is not None and t_node.text else "News Report"
+                        l_node = item.find("link")
+                        link = l_node.text.strip() if l_node is not None and l_node.text else ""
+                        s_node = item.find("source")
+                        publisher = s_node.text.strip() if s_node is not None and s_node.text else ""
+                        d_node = item.find("description")
+                        raw_desc = d_node.text.strip() if d_node is not None and d_node.text else ""
+                        p_node = item.find("pubDate")
+                        pub_date = p_node.text.strip() if p_node is not None and p_node.text else None
+                    else:
+                        t_tag = item.find("title")
+                        title = t_tag.get_text(strip=True) if t_tag else "News Report"
+                        l_tag = item.find("link")
+                        link = l_tag.get_text(strip=True) if l_tag else ""
+                        s_tag = item.find("source")
+                        publisher = s_tag.get_text(strip=True) if s_tag else ""
+                        d_tag = item.find("description")
+                        raw_desc = d_tag.get_text(strip=True) if d_tag else ""
+                        p_tag = item.find("pubDate")
+                        pub_date = p_tag.get_text(strip=True) if p_tag else None
+                else:
+                    continue
+
+                if not link:
+                    continue
+
+                headline = title
+                if " - " in title:
+                    parts = title.rsplit(" - ", 1)
+                    headline = parts[0].strip()
+                    if not publisher:
+                        publisher = parts[1].strip()
+
+                if not publisher:
+                    publisher = "Verified News Publisher"
+
+                snippet = ""
+                if raw_desc:
+                    desc_soup = BeautifulSoup(raw_desc, "html.parser")
+                    snippet = desc_soup.get_text(separator=" ", strip=True)
+
+                if snippet and snippet.lower() != headline.lower():
+                    combined_desc = f"{headline}. {snippet}"
+                else:
+                    combined_desc = f"{headline}. Reporting published by {publisher} ({pub_date[:16] if pub_date else 'Recent'})."
+
+                pub_lower = publisher.lower()
+                is_auth = any(auth in pub_lower for auth in [
+                    "reuters", "associated press", "ap news", "bbc", "who", "cdc", "nature",
+                    "the hindu", "the guardian", "nasa", "esa", "isro", "bloomberg",
+                    "financial times", "new york times", "washington post", "wall street journal",
+                    "afp", "al jazeera", "pib", "indian express", "un.org"
+                ]) or any(auth in link.lower() for auth in TRUSTED_DOMAINS)
+
+                sources.append({
+                    "title": headline,
+                    "publisher": publisher,
+                    "url": link,
+                    "description": sanitize_untrusted_page_text(combined_desc)[:400],
+                    "published_date": pub_date,
+                    "reliability": "High" if is_auth else "Moderate",
+                    "domain": "news.google.com",
+                    "source_type": "live_news_rss",
+                    "authoritative": is_auth
+                })
     except Exception as e:
         logger.debug(f"Google News RSS search exception for '{clean_query}': {e}")
         
@@ -230,25 +287,28 @@ def deduplicate_syndicated_sources(sources: List[Dict[str, Any]]) -> List[Dict[s
 def find_credible_evidence(claims: List[str], full_text: str) -> Dict[str, Any]:
     """
     Dynamic Universal Fallback Retriever:
-    Queries Wikipedia, Google News RSS, and DuckDuckGo without hardcoded hoaxes or keywords.
-    Deduplicates syndicated sources and inspects source stance dynamically.
+    Queries Wikipedia, Google News RSS, and DuckDuckGo using complete, meaningful factual claims.
+    Deduplicates syndicated sources and inspects source stance dynamically across all extracted claims.
     """
-    from app.services.claim_extractor import distill_claim_keywords
+    from app.services.claim_extractor import distill_claim_keywords, build_search_query_for_claim
     from app.services.tavily_search import inspect_source_stance
 
     all_sources = []
     supporting_evidence = []
     contradicting_evidence = []
 
-    # Dynamic query formulation using smart entity-aware distillation
+    # Dynamic query formulation using complete meaningful factual claims (not truncated 6-word fragments)
     search_queries = []
     for claim in claims[:3]:
+        full_query = build_search_query_for_claim(claim)
+        if full_query and full_query not in search_queries:
+            search_queries.append(full_query)
         distilled = distill_claim_keywords(claim)
         if distilled and distilled not in search_queries:
             search_queries.append(distilled)
 
     if not search_queries and full_text:
-        distilled_full = distill_claim_keywords(full_text[:300])
+        distilled_full = build_search_query_for_claim(full_text[:300]) or distill_claim_keywords(full_text[:300])
         if distilled_full and distilled_full not in search_queries:
             search_queries.append(distilled_full)
 
@@ -259,7 +319,7 @@ def find_credible_evidence(claims: List[str], full_text: str) -> Dict[str, Any]:
             if not any(s["url"] == w["url"] for s in all_sources):
                 all_sources.append(w)
 
-        # 2. Google News RSS
+        # 2. Google News RSS (queries complete meaningful claim)
         for n in search_google_news_rss(q, limit=2):
             if not any(s["url"] == n["url"] for s in all_sources):
                 all_sources.append(n)
@@ -272,23 +332,35 @@ def find_credible_evidence(claims: List[str], full_text: str) -> Dict[str, Any]:
     # Deduplicate syndicated stories
     deduped_sources = deduplicate_syndicated_sources(all_sources)
 
-    # Inspect stance for each deduplicated source
+    # Inspect stance across all claims (supporting, contradicting, or neutral/unrelated)
     primary_claim = claims[0] if claims else full_text[:120]
     for src in deduped_sources:
-        stance = inspect_source_stance(src, claim=primary_claim)
+        stance = "neutral"
+        matched_claim = primary_claim
+
+        for c in claims[:3]:
+            st = inspect_source_stance(src, claim=c)
+            if st == "contradicts":
+                stance = "contradicts"
+                matched_claim = c
+                break
+            elif st == "supports" and stance != "contradicts":
+                stance = "supports"
+                matched_claim = c
+
         src["stance"] = stance
-        if stance == "supports":
+        if stance == "supports" and src.get("authoritative"):
             supporting_evidence.append({
                 "source": src.get("publisher", "Authoritative Source"),
-                "claim_addressed": src.get("title", primary_claim),
-                "detail": src.get("description", "")[:240],
+                "claim_addressed": src.get("title", matched_claim),
+                "detail": src.get("description", "")[:250],
                 "url": src.get("url")
             })
         elif stance == "contradicts":
             contradicting_evidence.append({
                 "source": src.get("publisher", "Accredited Source"),
-                "claim_addressed": src.get("title", primary_claim),
-                "detail": src.get("description", "")[:240],
+                "claim_addressed": src.get("title", matched_claim),
+                "detail": src.get("description", "")[:250],
                 "url": src.get("url")
             })
 

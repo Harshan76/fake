@@ -64,8 +64,15 @@ class TruthLensOCR {
       this.verifyBtn.addEventListener("click", (e) => {
         if (e) e.preventDefault();
         const textToVerify = this.extractedTextArea ? this.extractedTextArea.value.trim() : "";
-        if (!textToVerify) {
-          alert("No text available to verify. Please enter or edit the text.");
+        const words = textToVerify.split(/\s+/).filter(Boolean);
+        if (!textToVerify || textToVerify.length < 20 || words.length < 4) {
+          alert("The screenshot text is incomplete or unreadable. Please type or paste the headline and article text in the box above to verify.");
+          if (this.extractedTextArea) this.extractedTextArea.focus();
+          return;
+        }
+        if (textToVerify.startsWith("Could not extract") || textToVerify.startsWith("No clear readable text")) {
+          alert("Please type or paste the actual news text from the screenshot before verifying.");
+          if (this.extractedTextArea) this.extractedTextArea.focus();
           return;
         }
         if (window.TruthLensApp && typeof window.TruthLensApp.executeVerification === "function") {
@@ -75,6 +82,25 @@ class TruthLensOCR {
         }
       });
     }
+  }
+
+  cleanOcrText(rawText) {
+    if (!rawText) return "";
+    const lines = rawText.split(/\r?\n/);
+    const filtered = [];
+    const noisePatterns = [
+      /^(?:\d{1,2}:\d{2}(?:\s*[ap]m)?|\d{1,3}%|5g|4g|lte|wi-?fi)$/i,
+      /^(?:like|comment|share|follow|following|sponsored|subscribe|saved?|reply)$/i,
+      /^(?:swipe (?:left|up|down)|tap to view|view insights|promoted)$/i,
+      /^[|~«»©™•—_\-+=]{1,3}$/
+    ];
+    for (const line of lines) {
+      const trimmed = line.trim();
+      if (!trimmed) continue;
+      if (noisePatterns.some(p => p.test(trimmed))) continue;
+      filtered.push(trimmed);
+    }
+    return filtered.join("\n").trim();
   }
 
   processImageFile(file) {
@@ -92,7 +118,7 @@ class TruthLensOCR {
     this.statusWrapper.style.display = "block";
     this.progressStatus.textContent = "Initializing OCR optical engine...";
     this.progressBar.style.width = "15%";
-    this.extractedTextArea.value = "Reading and analyzing text in image...";
+    this.extractedTextArea.value = "Reading and analyzing text in screenshot...";
 
     // Ensure Tesseract library is loaded
     if (typeof Tesseract === "undefined") {
@@ -122,17 +148,22 @@ class TruthLensOCR {
         this.progressBar.style.width = "50%";
         
         const ret = await worker.recognize(imageDataUrl);
-        const extracted = ret.data.text.trim();
+        const rawExtracted = ret.data.text.trim();
         await worker.terminate();
 
+        const cleaned = this.cleanOcrText(rawExtracted);
+        const words = cleaned.split(/\s+/).filter(Boolean);
+
         this.progressBar.style.width = "100%";
-        this.progressStatus.textContent = "OCR extraction completed successfully!";
         
-        if (extracted) {
-          this.currentExtractedText = extracted;
-          this.extractedTextArea.value = extracted;
+        if (cleaned && cleaned.length >= 20 && words.length >= 4) {
+          this.progressStatus.textContent = "OCR extraction completed successfully! Please review the text below.";
+          this.currentExtractedText = cleaned;
+          this.extractedTextArea.value = cleaned;
         } else {
-          this.extractedTextArea.value = "No clear readable text was detected in this image. You may type or correct the text above.";
+          this.progressStatus.textContent = "Screenshot text appears incomplete or blurry. Please edit or complete the text below.";
+          this.extractedTextArea.value = cleaned;
+          this.extractedTextArea.placeholder = "Could not clearly detect news text. Please type or paste the headline and article text here...";
         }
       } catch (err) {
         console.warn("Client Tesseract error, using fallback parser:", err);
@@ -145,10 +176,10 @@ class TruthLensOCR {
 
   fallbackExtraction(filename) {
     this.progressBar.style.width = "100%";
-    this.progressStatus.textContent = "Text extracted via optical analyzer.";
-    // If client Tesseract is blocked by strict CSP or offline, prompt user to review/edit
-    if (!this.extractedTextArea.value || this.extractedTextArea.value.includes("Reading")) {
-      this.extractedTextArea.value = "URGENT ALERT: Government introduces mandatory tax on home vegetable gardens. Forward this message before it gets passed in parliament tomorrow!";
+    this.progressStatus.textContent = "OCR scanner unavailable. Please type or paste the text from your screenshot below.";
+    if (!this.extractedTextArea.value || this.extractedTextArea.value.includes("Reading and analyzing")) {
+      this.extractedTextArea.value = "";
+      this.extractedTextArea.placeholder = "Optical scanner could not read this image automatically. Please type or paste the headline and article text here...";
     }
   }
 }

@@ -197,14 +197,92 @@ def extract_claim_predicates(claim: str) -> Dict[str, Any]:
         "numbers": numbers
     }
 
-def distill_claim_keywords(claim: str, max_words: int = 7) -> str:
+def build_search_query_for_claim(claim: str, max_words: int = 12) -> str:
     """
-    Distills a verbose claim sentence into 4-7 salient search keywords.
+    Constructs a complete, meaningful, high-precision search query from a factual claim.
+    Retains important names, dates, organisations, and event action predicates without
+    blind truncation to the first few words of an article.
+    """
+    if not claim:
+        return ""
+
+    clean = re.sub(r'["\'\(\)\[\]\{\},:;!?\-.]', ' ', claim)
+    clean = re.sub(
+        r'\b(forwarded as received|urgent alert|breaking news|doctors stunned|secretly leaked|shocking discovery|viral claim|check this out)\b',
+        '', clean, flags=re.I
+    )
+
+    entities_data = extract_entities_and_statistics(claim)
+    named_entities = entities_data.get("entities", [])
+    numbers = entities_data.get("numbers", [])
+    dates = entities_data.get("dates", [])
+    attributions = entities_data.get("attributions", [])
+
+    deconstructed = extract_claim_predicates(claim)
+    predicates = list(deconstructed.get("predicates", []))
+
+    query_tokens = []
+
+    # 1. Primary entity or attribution (deduplicated)
+    seen_entities = set()
+    for attr in attributions:
+        attr_clean = re.sub(r'^(?:the|an?)\s+', '', attr.strip(), flags=re.I)
+        attr_norm = attr_clean.lower()
+        if attr_norm not in seen_entities and len(attr_clean) > 2:
+            seen_entities.add(attr_norm)
+            query_tokens.append(attr_clean)
+
+    for ne in named_entities:
+        ne_clean = re.sub(r'^(?:the|an?)\s+', '', ne.strip(), flags=re.I)
+        ne_norm = ne_clean.lower()
+        if ne_norm not in seen_entities and not any(ne_norm in s or s in ne_norm for s in seen_entities) and len(ne_clean) > 2:
+            seen_entities.add(ne_norm)
+            query_tokens.append(ne_clean)
+
+    # 2. Event action predicates (WHAT happened)
+    # Filter out generic domain words from leading search position
+    prioritized_predicates = [
+        p for p in predicates
+        if p.lower() not in GENERIC_TITLES and p.lower() not in META_AND_ATTRIBUTION_WORDS
+    ]
+    for p in prioritized_predicates[:4]:
+        if p not in query_tokens:
+            query_tokens.append(p)
+
+    # 3. Numbers, percentages, dates
+    for num in numbers[:2]:
+        if num not in query_tokens:
+            query_tokens.append(num)
+    for dt in dates[:1]:
+        if dt not in query_tokens:
+            query_tokens.append(dt)
+
+    # Fallback to distilled words if tokens are too few
+    if len(query_tokens) < 3:
+        words = [
+            w for w in clean.split()
+            if w.lower() not in COMMON_STOPWORDS and len(w) > 2 and w.lower() not in META_AND_ATTRIBUTION_WORDS
+        ]
+        for w in words:
+            if w not in query_tokens:
+                query_tokens.append(w)
+            if len(query_tokens) >= max_words:
+                break
+
+    return " ".join(query_tokens[:max_words]).strip()
+
+def distill_claim_keywords(claim: str, max_words: int = 10) -> str:
+    """
+    Distills a verbose claim sentence into salient search keywords.
     Prioritizes entities, proper nouns, numerical values, and domain-specific predicates.
     Demotes conversational noise, stopwords, and generic institutional titles.
     """
     if not claim:
         return ""
+
+    query = build_search_query_for_claim(claim, max_words=max_words)
+    if query:
+        return query
 
     clean = re.sub(r'["\'\(\)\[\]\{\},:;!?\-.]', ' ', claim)
     clean = re.sub(r'\b(forwarded as received|urgent alert|breaking news|doctors stunned|secretly leaked|shocking discovery)\b', '', clean, flags=re.I)
@@ -318,10 +396,11 @@ def extract_key_claims(text: str) -> List[str]:
         if re.search(r'\b\d+(\.\d+)?%?\b|\$\d+|\b(19|20)\d{2}\b', s):
             score += 2
             
-        # Check for named entities or capitalized terms (proper nouns)
-        caps_words = re.findall(r'\b[A-Z][a-z]+\b', s)
-        if len(caps_words) >= 2:
-            score += 1.5
+        # Check for named entities or capitalized terms (proper nouns and acronyms like NASA, WHO, CDC)
+        caps_words = re.findall(r'\b[A-Z]{2,}\b|\b[A-Z][a-z]+\b', s)
+        filtered_caps = [w for w in caps_words if w.lower() not in COMMON_STOPWORDS and w.lower() not in META_AND_ATTRIBUTION_WORDS]
+        if len(filtered_caps) >= 2 or any(w.isupper() and len(w) >= 2 for w in caps_words):
+            score += 2.0
             
         # Check for direct or indirect quotations
         if '"' in s or "'" in s:

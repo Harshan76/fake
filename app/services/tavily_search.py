@@ -27,10 +27,10 @@ DEBUNK_INDICATORS = [
     r'\bfact[-\s]?check\b', r'\bdebunk(?:ed)?\b', r'\bhoax\b', r'\bfalse claim\b',
     r'\bnot true\b', r'\bno evidence\b', r'\bfabricat(?:ed|ion)\b', r'\bmisleading\b',
     r'\bdisproven\b', r'\bdisproved\b', r'\bbogus\b', r'\bsatire\b', r'\bfictional\b',
-    r'\brumou?r\b', r'\bnever (?:said|occurred|happened)\b',
+    r'\bfalse rumou?rs?\b', r'\bunfounded rumou?rs?\b', r'\bnever (?:said|occurred|happened)\b',
     r'\bdid not (?:announce|say|happen)\b', r'\bdoes not exist\b', r'\bno such (?:agency|department|organization|commission)\b',
     r'\bpants on fire\b', r'\bmisattributed\b', r'\bunfounded\b', r'\bcounterfeit\b', r'\bphony\b',
-    r'\bimpossible\b', r'\buntrue\b', r'\bmyth\b', r'\bunverified\b', r'\bfake news\b'
+    r'\bimpossible\b', r'\buntrue\b', r'\bmyth\b', r'\bfake news\b'
 ]
 
 COMMON_STOPWORDS = {
@@ -135,7 +135,16 @@ def inspect_source_stance(source: Dict[str, Any], claim: str = "") -> str:
         return "neutral"
 
     # Predicate overlap: does the source corroborate WHAT happened?
-    predicate_overlap = predicates.intersection(source_tokens)
+    # Supports exact match and morphological variants (e.g. launch/launched, stabilize/stabilized)
+    predicate_overlap = set()
+    for p in predicates:
+        if p in source_tokens:
+            predicate_overlap.add(p)
+        elif len(p) >= 4:
+            p_prefix = p[:4]
+            if any(st.startswith(p_prefix) or (len(st) >= 4 and p.startswith(st[:4])) for st in source_tokens if len(st) >= 4):
+                predicate_overlap.add(p)
+
     entity_overlap = entity_words.intersection(source_tokens)
     number_overlap = set(n for n in numbers if n.lower() in text_to_check)
 
