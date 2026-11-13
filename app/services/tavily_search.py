@@ -24,13 +24,17 @@ AUTHORITATIVE_DOMAINS = {
 
 # Indicators that a source is reporting a fact-check refutation or debunk
 DEBUNK_INDICATORS = [
-    r'\bfact[-\s]?check\b', r'\bdebunk(?:ed)?\b', r'\bhoax\b', r'\bfalse claim\b',
-    r'\bnot true\b', r'\bno evidence\b', r'\bfabricat(?:ed|ion)\b', r'\bmisleading\b',
-    r'\bdisproven\b', r'\bdisproved\b', r'\bbogus\b', r'\bsatire\b', r'\bfictional\b',
+    r'\bfact[-\s]?check\b', r'\bdebunk(?:ed|ing|s)?\b', r'\bhoax\b', r'\bfalse claim\b',
+    r'\bnot true\b', r'\bno evidence\b', r'\bno scientific evidence\b', r'\bfabricat(?:ed|ion)\b',
+    r'\bmisleading\b', r'\bdisproven\b', r'\bdisproved\b', r'\bbogus\b', r'\bsatire\b', r'\bfictional\b',
     r'\bfalse rumou?rs?\b', r'\bunfounded rumou?rs?\b', r'\bnever (?:said|occurred|happened)\b',
     r'\bdid not (?:announce|say|happen)\b', r'\bdoes not exist\b', r'\bno such (?:agency|department|organization|commission)\b',
     r'\bpants on fire\b', r'\bmisattributed\b', r'\bunfounded\b', r'\bcounterfeit\b', r'\bphony\b',
-    r'\bimpossible\b', r'\buntrue\b', r'\bmyth\b', r'\bfake news\b'
+    r'\bimpossible\b', r'\buntrue\b', r'\bmyths?\b', r'\bfake news\b',
+    r'\bfalse\b[:\s]', r'\brated false\b',
+    r'\b(?:does not|do not|cannot|can\'t|won\'t|will not|never)\s+(?:cure|prevent|treat|protect|work|eliminate|heal)\b',
+    r'\bnot recommended as (?:a|an)?\s*(?:cure|treatment|prevention)\b',
+    r'\bunproven (?:method|remedy|treatment|cure|product)\b'
 ]
 
 COMMON_STOPWORDS = {
@@ -68,7 +72,9 @@ GENERIC_DOMAIN_WORDS = {
     'scientist', 'scientists', 'expert', 'experts', 'official', 'officials',
     'rumor', 'rumours', 'rumour', 'video', 'videos', 'photo', 'photos',
     'say', 'says', 'said', 'state', 'states', 'stated', 'confirm', 'confirms',
-    'confirmed', 'warn', 'warns', 'warned', 'announce', 'announces', 'announced'
+    'confirmed', 'warn', 'warns', 'warned', 'announce', 'announces', 'announced',
+    'best', 'global', 'deep', 'great', 'good', 'new', 'first', 'high', 'top',
+    'major', 'competition', 'award', 'prize', 'system', 'program', 'part', 'time'
 }
 
 def is_tavily_configured() -> bool:
@@ -105,10 +111,15 @@ def inspect_source_stance(source: Dict[str, Any], claim: str = "") -> str:
     if raw_content:
         text_to_check += " " + raw_content[:1500].lower()
     
-    # 1. Check for explicit debunk / refutation markers
-    for pattern in DEBUNK_INDICATORS:
-        if re.search(pattern, text_to_check):
-            return "contradicts"
+    source_tokens = extract_substantive_tokens(text_to_check)
+    claim_tokens = extract_substantive_tokens(claim) if claim else set()
+
+    # 1. Check for explicit debunk / refutation markers relevant to this claim
+    has_substantive_overlap = bool(len(claim_tokens.intersection(source_tokens)) >= 2) if claim_tokens else True
+    if has_substantive_overlap:
+        for pattern in DEBUNK_INDICATORS:
+            if re.search(pattern, text_to_check):
+                return "contradicts"
 
     # Only authoritative sources can corroborate
     is_auth = source.get("authoritative", False)
@@ -127,9 +138,6 @@ def inspect_source_stance(source: Dict[str, Any], claim: str = "") -> str:
     predicates = deconstructed.get("predicates", set())
     entity_words = deconstructed.get("entity_words", set())
     numbers = deconstructed.get("numbers", set())
-
-    source_tokens = extract_substantive_tokens(text_to_check)
-    claim_tokens = extract_substantive_tokens(claim)
 
     if not claim_tokens:
         return "neutral"
@@ -151,20 +159,24 @@ def inspect_source_stance(source: Dict[str, Any], claim: str = "") -> str:
     # Core action/event predicates (excluding broad domain/topic vocabulary)
     action_predicate_overlap = predicate_overlap - GENERIC_DOMAIN_WORDS
 
+    # Entity requirement: If claim specifies named entities (e.g. UNESCO, WHO, NASA, Canada),
+    # an external source cannot corroborate without mentioning the subject entity!
+    if entity_words and len(entity_overlap) == 0:
+        return "neutral"
+
     # A source CANNOT corroborate an event claim if it has ZERO core event action predicate overlap!
     # (e.g. A biography of Lionel Messi or Joe Biden or Canada that doesn't mention the event)
     if predicates and len(action_predicate_overlap) == 0:
         return "neutral"
 
     # To genuinely corroborate, the source must cover:
-    # At least 2 distinct action predicate tokens, OR 1 action predicate token with direct entity/number confirmation
+    # At least 1 core action predicate, plus entity/number confirmation, and substantive overall overlap
+    overall_overlap = claim_tokens.intersection(source_tokens)
     has_event_corroboration = False
-    if len(action_predicate_overlap) >= 2:
+    if len(action_predicate_overlap) >= 2 and len(overall_overlap) >= 3:
         has_event_corroboration = True
-    elif len(action_predicate_overlap) >= 1 and (len(entity_overlap) >= 1 or len(number_overlap) >= 1):
-        overall_overlap = claim_tokens.intersection(source_tokens)
-        if len(overall_overlap) >= 3:
-            has_event_corroboration = True
+    elif len(action_predicate_overlap) >= 1 and (len(entity_overlap) >= 1 or len(number_overlap) >= 1) and len(overall_overlap) >= 3:
+        has_event_corroboration = True
 
     if has_event_corroboration:
         return "supports"

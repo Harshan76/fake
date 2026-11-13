@@ -218,6 +218,28 @@ class TruthLensVerificationAudit(unittest.TestCase):
         self.assertGreaterEqual(len(resp["contradicting_evidence"]), 1)
         print(f"[Test B4] Alien Docking JWST -> Verdict: {resp['classification']}, Conf: {resp['confidence_score']}%, Contradictions: {len(resp['contradicting_evidence'])}")
 
+    def test_B5_garlic_ginger_covid_cure(self):
+        """Fabricated news: Garlic and ginger cures COVID-19 and prevents infection."""
+        content = "Eating raw garlic and ginger completely cures COVID-19 and prevents coronavirus infection according to health experts."
+        mock_debunk = {
+            "title": "Debunks of novel coronavirus prevention, cures, treatments - AFP Fact Check",
+            "publisher": "AFP Fact Check",
+            "url": "https://factcheck.afp.com/debunk-novel-coronavirus",
+            "description": "Consuming raw garlic or boiled ginger cannot cure or prevent COVID-19. The WHO confirmed there is no scientific evidence that garlic protects people from coronavirus.",
+            "authoritative": True,
+            "stance": "contradicts"
+        }
+        with patch("app.services.verifier.search_claims_evidence", return_value={"sources": [mock_debunk], "contradicting": [mock_debunk], "supporting": []}), \
+             patch("app.services.verifier.search_claims_fact_checks", return_value={"reviews": [], "contradicting": [mock_debunk], "supporting": []}):
+            req = VerificationRequest(content=content, input_type="text")
+            resp = verify_endpoint(req, db=self.db)
+
+        self.assertEqual(resp["classification"], "FAKE")
+        self.assertGreaterEqual(resp["confidence_score"], 88.0)
+        self.assertGreaterEqual(len(resp["contradicting_evidence"]), 1)
+        self.assertEqual(len(resp["supporting_evidence"]), 0)
+        print(f"[Test B5] Garlic COVID Cure -> Verdict: {resp['classification']}, Conf: {resp['confidence_score']}%, Contradictions: {len(resp['contradicting_evidence'])}")
+
     # =========================================================================
     # Group C: 2 Unfamiliar Articles with Insufficient Evidence
     # =========================================================================

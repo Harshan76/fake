@@ -197,11 +197,11 @@ def extract_claim_predicates(claim: str) -> Dict[str, Any]:
         "numbers": numbers
     }
 
-def build_search_query_for_claim(claim: str, max_words: int = 12) -> str:
+def build_search_query_for_claim(claim: str, max_words: int = 10) -> str:
     """
     Constructs a complete, meaningful, high-precision search query from a factual claim.
-    Retains important names, dates, organisations, and event action predicates without
-    blind truncation to the first few words of an article.
+    Retains all important names, remedies, dates, organisations, and event action predicates in their
+    natural sentence order, without arbitrary truncation to the first few words of an article.
     """
     if not claim:
         return ""
@@ -212,64 +212,21 @@ def build_search_query_for_claim(claim: str, max_words: int = 12) -> str:
         '', clean, flags=re.I
     )
 
-    entities_data = extract_entities_and_statistics(claim)
-    named_entities = entities_data.get("entities", [])
-    numbers = entities_data.get("numbers", [])
-    dates = entities_data.get("dates", [])
-    attributions = entities_data.get("attributions", [])
-
-    deconstructed = extract_claim_predicates(claim)
-    predicates = list(deconstructed.get("predicates", []))
-
+    words = clean.split()
     query_tokens = []
+    seen = set()
 
-    # 1. Primary entity or attribution (deduplicated)
-    seen_entities = set()
-    for attr in attributions:
-        attr_clean = re.sub(r'^(?:the|an?)\s+', '', attr.strip(), flags=re.I)
-        attr_norm = attr_clean.lower()
-        if attr_norm not in seen_entities and len(attr_clean) > 2:
-            seen_entities.add(attr_norm)
-            query_tokens.append(attr_clean)
+    for w in words:
+        wl = w.lower().strip('.,;:\'"?!')
+        if len(wl) <= 1 or wl in COMMON_STOPWORDS or wl in META_AND_ATTRIBUTION_WORDS:
+            continue
+        if wl not in seen:
+            seen.add(wl)
+            query_tokens.append(w.strip('.,;:\'"?!'))
+        if len(query_tokens) >= max_words:
+            break
 
-    for ne in named_entities:
-        ne_clean = re.sub(r'^(?:the|an?)\s+', '', ne.strip(), flags=re.I)
-        ne_norm = ne_clean.lower()
-        if ne_norm not in seen_entities and not any(ne_norm in s or s in ne_norm for s in seen_entities) and len(ne_clean) > 2:
-            seen_entities.add(ne_norm)
-            query_tokens.append(ne_clean)
-
-    # 2. Event action predicates (WHAT happened)
-    # Filter out generic domain words from leading search position
-    prioritized_predicates = [
-        p for p in predicates
-        if p.lower() not in GENERIC_TITLES and p.lower() not in META_AND_ATTRIBUTION_WORDS
-    ]
-    for p in prioritized_predicates[:4]:
-        if p not in query_tokens:
-            query_tokens.append(p)
-
-    # 3. Numbers, percentages, dates
-    for num in numbers[:2]:
-        if num not in query_tokens:
-            query_tokens.append(num)
-    for dt in dates[:1]:
-        if dt not in query_tokens:
-            query_tokens.append(dt)
-
-    # Fallback to distilled words if tokens are too few
-    if len(query_tokens) < 3:
-        words = [
-            w for w in clean.split()
-            if w.lower() not in COMMON_STOPWORDS and len(w) > 2 and w.lower() not in META_AND_ATTRIBUTION_WORDS
-        ]
-        for w in words:
-            if w not in query_tokens:
-                query_tokens.append(w)
-            if len(query_tokens) >= max_words:
-                break
-
-    return " ".join(query_tokens[:max_words]).strip()
+    return " ".join(query_tokens).strip()
 
 def distill_claim_keywords(claim: str, max_words: int = 10) -> str:
     """
@@ -284,30 +241,8 @@ def distill_claim_keywords(claim: str, max_words: int = 10) -> str:
     if query:
         return query
 
-    clean = re.sub(r'["\'\(\)\[\]\{\},:;!?\-.]', ' ', claim)
-    clean = re.sub(r'\b(forwarded as received|urgent alert|breaking news|doctors stunned|secretly leaked|shocking discovery)\b', '', clean, flags=re.I)
-    
-    words = clean.split()
-    priority_words = []
-    secondary_words = []
-    
-    for w in words:
-        w_clean = w.strip('.,;:\'"?!')
-        w_lower = w_clean.lower()
-        if not w_clean or len(w_clean) < 2 or w_lower in COMMON_STOPWORDS:
-            continue
-        if re.search(r'\d', w_clean) or (w_clean[0].isupper() and w_lower not in GENERIC_TITLES):
-            if w_clean not in priority_words:
-                priority_words.append(w_clean)
-        elif w_lower not in GENERIC_TITLES:
-            if w_clean not in secondary_words:
-                secondary_words.append(w_clean)
-                
-    combined = (priority_words + secondary_words)[:max_words]
-    if not combined:
-        return " ".join([w.strip('.,;:\'"?!') for w in words[:max_words]])
-        
-    return " ".join(combined)
+    words = claim.split()
+    return " ".join([w.strip('.,;:\'"?!') for w in words[:max_words]])
 
 def generate_adaptive_verification_queries(claim: str, topic: Optional[str] = None, full_text: Optional[str] = None) -> Dict[str, Any]:
     """

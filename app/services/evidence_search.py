@@ -299,33 +299,37 @@ def find_credible_evidence(claims: List[str], full_text: str) -> Dict[str, Any]:
 
     # Dynamic query formulation using complete meaningful factual claims (not truncated 6-word fragments)
     search_queries = []
+    debunk_queries = []
     for claim in claims[:3]:
         full_query = build_search_query_for_claim(claim)
         if full_query and full_query not in search_queries:
             search_queries.append(full_query)
-        distilled = distill_claim_keywords(claim)
-        if distilled and distilled not in search_queries:
-            search_queries.append(distilled)
+            debunk_queries.append(f"{full_query} fact check")
 
     if not search_queries and full_text:
         distilled_full = build_search_query_for_claim(full_text[:300]) or distill_claim_keywords(full_text[:300])
         if distilled_full and distilled_full not in search_queries:
             search_queries.append(distilled_full)
+            debunk_queries.append(f"{distilled_full} fact check")
 
-    # Retrieve sources across open providers
-    for q in search_queries[:3]:
-        # 1. Wikipedia Knowledge
+    # 1. Retrieve factual reporting sources across open providers
+    for q in search_queries[:2]:
         for w in search_wikipedia_knowledge(q, limit=2):
             if not any(s["url"] == w["url"] for s in all_sources):
                 all_sources.append(w)
-
-        # 2. Google News RSS (queries complete meaningful claim)
-        for n in search_google_news_rss(q, limit=2):
+        for n in search_google_news_rss(q, limit=3):
             if not any(s["url"] == n["url"] for s in all_sources):
                 all_sources.append(n)
-
-        # 3. DuckDuckGo Web
         for d in search_duckduckgo_lite(q, limit=2):
+            if not any(s["url"] == d["url"] for s in all_sources):
+                all_sources.append(d)
+
+    # 2. Retrieve fact-check & debunk sources targeted for refutation inspection
+    for dq in debunk_queries[:2]:
+        for n in search_google_news_rss(dq, limit=3):
+            if not any(s["url"] == n["url"] for s in all_sources):
+                all_sources.append(n)
+        for d in search_duckduckgo_lite(dq, limit=2):
             if not any(s["url"] == d["url"] for s in all_sources):
                 all_sources.append(d)
 
